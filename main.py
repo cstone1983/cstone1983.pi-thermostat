@@ -227,10 +227,10 @@ try:
             time_prev = time_now
         sleep(5)
         if ((new_Temperature > set_Temp) and (relay_State == 1)):
-    
+
                 relay_Off(relaypin)
         elif (( (new_Temperature + .5) < set_Temp) and (relay_State == 0) and (new_Temperature != False)):
-                
+  
             relay_On(relaypin)
                 
 
