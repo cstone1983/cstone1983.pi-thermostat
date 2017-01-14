@@ -147,7 +147,7 @@ def motion_detect( threadname, pin, delay):
                 print("Motion Detected, Returning Temp to: " + str(prev_set_Temp))
                 temp_overriden = 0
             motion_detect = 1
-            print("Detected Motion")
+            #print("Detected Motion")
             
             sleep(2)
         #print (i)
