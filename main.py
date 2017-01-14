@@ -163,7 +163,7 @@ def relay_On(pin):
         #GPIO.output(ledpin, GPIO.HIGH)
         relay_State = 1
         print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
-    elif (relay_state == 0):
+    elif (relay_State == 1):
         print("Relay Already ON")
         
 def relay_Off(pin):
