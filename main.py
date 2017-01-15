@@ -4,7 +4,7 @@ import _thread
 from datetime import datetime
 import sys
 from dht11 import *
-
+from pushbullet import Pushbullet
 #Globals
 global relaypin
 global pirpin
@@ -13,6 +13,7 @@ global new_Humidity
 global relay_State
 global set_Temp
 global backup_Temp
+
 
 
 ## Setup Vars
@@ -29,6 +30,8 @@ backup_Temp = 58 # used for no motion
 time_prev = int(time.time()) #used in delays
 main_print_delay = 60 # Used in main loop for time delay for print debug statement
 stop_button = 16
+
+
 
 ## Setup GPIO
 GPIO.setmode(GPIO.BCM) # Board Setup
@@ -97,7 +100,7 @@ def th_Update( threadname, delay): #keep temp and humidity updated in background
 
             current_Temp = pull_Temperature() #pull current temp
 
-            if ((current_Temp != False)): # if it has a value and not over 5 degrees les
+            if ((current_Temp != False) and (current_Temp > 32)): # if it has a value and not over 5 degrees les
                 new_Temperature = current_Temp
 
             if (new_Temperature != old_Temperature): ## Temp Changed
@@ -140,11 +143,13 @@ def motion_detect( threadname, pin, delay):
                     set_Temp = backup_Temp
                     temp_overriden = 1
                     print("No Motion, Temp Set to: " + str(backup_Temp))
+                    send_Notification("Living Room", ("No Motion, Temp set to: " + str(backup_Temp)), "send")
                     
         elif (i == 1):
             if (temp_overriden == 1):
                 set_Temp = prev_set_Temp
                 print("Motion Detected, Returning Temp to: " + str(prev_set_Temp))
+                send_Notification("Living Room", ("Motion Detected, Temp Returned to: " + str(backup_Temp)), "send")
                 temp_overriden = 0
             motion_detect = 1
             #print("Detected Motion")
@@ -155,32 +160,38 @@ def motion_detect( threadname, pin, delay):
         
 def relay_On(pin):
     global relay_State
-    global relaypin
+    
     if (relay_State == 0):
         print("Relay ON")
-        GPIO.setup(relaypin, GPIO.OUT) ## Relay SETUP
-        GPIO.output(relaypin, GPIO.HIGH)
+        GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+        GPIO.output(pin, GPIO.HIGH)
         #GPIO.output(ledpin, GPIO.HIGH)
         relay_State = 1
-        print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
+        
+        send_Notification("none", "none", "clear")
+            
+        send_Notification("Living Room", ("Heater is on and the Temp is: " + str(new_Temperature)), 'send')
+        
+        print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp) + strftime("%I:%M:%S"))
     elif (relay_State == 1):
         print("Relay Already ON")
         
 def relay_Off(pin):
     global relay_State
-    global relaypin
     if (relay_State == 1):
         print("Relay OFF")
-        GPIO.setup(relaypin, GPIO.OUT) ## Relay SETUP
+        GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
         GPIO.output(pin, GPIO.LOW)
         relay_State = 0
-        print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
+        send_Notification("none", "none", "clear")
+        send_Notification("Living Room", ("Heater is off and Temp is: " + str(new_Temperature)), 'send')
+        print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp) + strftime("%I:%M:%S"))
     elif (relay_State == 0):
         print("Relay Already OFF")
 
 def user_Input( threadname, temp):
     global set_Temp
-    
+    global relay_State
     while True:
         action = input("What do you want to do: ")
 
@@ -192,9 +203,29 @@ def user_Input( threadname, temp):
             print("Current Commands are: temp, help, info")
         if (action == "info"):
             print("Main Loop Running, Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: " + strftime("%I:%M:%S"))
+        if (action == 'notify'):
+            if (relay_State == 1):
+                relay = "ON"
+            else:
+                relay = "OFF"
+            info = ("Current Temp: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + " F Heat is: " + relay + " Time is: " + strftime("%I:%M:%S"))
+            send_Notification("Current Info", info, 'send')
+        if (action == 'clear'):
+            send_Notification('None', 'None', 'delete')
         action = 0
 
-
+def send_Notification(title, body, action):
+    pb = Pushbullet('o.YYc1GgqyrOCPj1peMzmYaoI0aJw7YLyI')
+    data = {
+        'type':'note',
+        'title':title,
+        'body':body
+        }
+    #resp = requests.post('https://api.pushbullet.com/api/pushes',data=data, auth=(API_KEY,''))
+    if (action == 'send'):
+        push = pb.push_note(title, body)
+    if (action == 'clear'):
+        push = pb.delete_pushes()
 ###############
 #Call Button Threads
 ###############
