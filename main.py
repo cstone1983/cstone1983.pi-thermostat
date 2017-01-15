@@ -97,7 +97,7 @@ def th_Update( threadname, delay): #keep temp and humidity updated in background
 
             current_Temp = pull_Temperature() #pull current temp
 
-            if (current_Temp != False): # if it has a value
+            if ((current_Temp != False)): # if it has a value and not over 5 degrees les
                 new_Temperature = current_Temp
 
             if (new_Temperature != old_Temperature): ## Temp Changed
@@ -187,7 +187,7 @@ def user_Input( threadname, temp):
         if (action == "temp"):
             temp_change = input("What Temperature do you want to change to: ")
             set_Temp = int(temp_change)
-            print("Temp Changed to: " + set_Temp)
+            print("Temp Changed to: " + str(set_Temp))
         if (action == "help"):
             print("Current Commands are: temp, help, info")
         if (action == "info"):
