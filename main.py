@@ -97,7 +97,7 @@ def th_Update( threadname, delay): #keep temp and humidity updated in background
 
             current_Temp = pull_Temperature() #pull current temp
 
-            if (current_Temp != False): # if it has a value
+            if ((current_Temp != False)): # if it has a value and not over 5 degrees les
                 new_Temperature = current_Temp
 
             if (new_Temperature != old_Temperature): ## Temp Changed
@@ -123,7 +123,7 @@ def motion_detect( threadname, pin, delay):
 
     time_prev = int(time.time())
     prev_set_Temp = set_Temp
-    no_motion_delay = 300
+    no_motion_delay = 600
     temp_overriden = 0
     GPIO.setup(pirpin, GPIO.IN)
     while True:
@@ -147,7 +147,7 @@ def motion_detect( threadname, pin, delay):
                 print("Motion Detected, Returning Temp to: " + str(prev_set_Temp))
                 temp_overriden = 0
             motion_detect = 1
-            print("Detected Motion")
+            #print("Detected Motion")
             
             sleep(2)
         #print (i)
@@ -177,6 +177,24 @@ def relay_Off(pin):
         print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
     elif (relay_State == 0):
         print("Relay Already OFF")
+
+def user_Input( threadname, temp):
+    global set_Temp
+    
+    while True:
+        action = input("What do you want to do: ")
+
+        if (action == "temp"):
+            temp_change = input("What Temperature do you want to change to: ")
+            set_Temp = int(temp_change)
+            print("Temp Changed to: " + str(set_Temp))
+        if (action == "help"):
+            print("Current Commands are: temp, help, info")
+        if (action == "info"):
+            print("Main Loop Running, Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: " + strftime("%I:%M:%S"))
+        action = 0
+
+
 ###############
 #Call Button Threads
 ###############
@@ -204,6 +222,11 @@ try:
     _thread.start_new_thread( motion_detect, ("Detect Motion", pirpin, 30))
 except:
     print("Error Starting Motion Detection")
+
+try:
+    _thread.start_new_thread( user_Input, ("User Input", set_Temp))
+except:
+    print("Error Starting User Input")
     
 ############################################
 ## Opening Print to show current Setting
@@ -222,7 +245,7 @@ try:
                 
         if (time_now >= (time_prev + main_print_delay)):
             ## Debug Messages
-            print("Main Loop Running, Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: " + str(time_now))
+            #print("Main Loop Running, Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: " + strftime("%I:%M:%S"))
             #################
             time_prev = time_now
         sleep(5)
