@@ -5,6 +5,7 @@ from datetime import datetime
 import sys
 from dht11 import *
 from pushbullet import Pushbullet
+import numpy
 #Globals
 global relaypin
 global pirpin
@@ -95,17 +96,39 @@ def th_Update( threadname, delay): #keep temp and humidity updated in background
     old_Temperature = 0
     new_Humidity = pull_Humidity()
     old_Humidity = 0
+    i = 1
+    avg_Time = 10 # Span of time for average in sec
+    avg_temp_Data = [0]
+    print("Getting Average Temperature...Please Wait..")
+    while (i < avg_Time):
+        get_Temp = pull_Temperature()
+        if (int(get_Temp) > 0):
+            avg_temp_Data.append(pull_Temperature())
+            i += 1
+            print (get_Temp)
+            print((avg_Time - i))
+            sleep(1)
+
+    print(avg_temp_Data)
     try:
         while True:
 
             current_Temp = pull_Temperature() #pull current temp
 
-            if ((current_Temp != False) and (current_Temp > 32)): # if it has a value and not over 5 degrees les
-                new_Temperature = current_Temp
-
-            if (new_Temperature != old_Temperature): ## Temp Changed
+            if (int(current_Temp > 0)):
+                avg_temp_Data.append(current_Temp)
+                del avg_temp_Data[0]
+                new_Temperature = numpy.mean(avg_temp_Data)
+                print (new_Temperature)
+                sleep(1)
+            
+#            avg_temp_Data.append(current_Temp)
+#            if ((current_Temp != False) and (current_Temp > 32)): # if it has a value and not over 5 degrees les
+#                new_Temperature = current_Temp
+#
+#            if (new_Temperature != old_Temperature): ## Temp Changed
 #                print("Temperature changed to: " + str(new_Temperature) + "F")
-                old_Temperature = new_Temperature
+#                old_Temperature = new_Temperature
 
             ## Get current Humidity
 
@@ -273,7 +296,7 @@ try:
     while True:
         
         time_now = int(time.time()) ## Keep current time updated for use in counter and motion sensor
-                
+               
         if (time_now >= (time_prev + main_print_delay)):
             ## Debug Messages
             #print("Main Loop Running, Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: " + strftime("%I:%M:%S"))
