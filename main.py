@@ -4,7 +4,7 @@ import _thread
 import threading
 from datetime import datetime
 import sys
-from dht11 import *
+import dht
 from pushbullet import Pushbullet
 import numpy
 import os
@@ -31,7 +31,7 @@ pirpin = 5 # Pin connected to PIR
 relay_State = 0 # State of relay, so relay is not constantly being triggered on or off
 set_Temp = 63 # Temperature setpoint
 backup_Temp = 58 # used for no motion
-time_prev = int(time.time()) #used in delays
+time_prev = int(time()) #used in delays
 main_print_delay = 60 # Used in main loop for time delay for print debug statement
 stop_button = 16
 avg_Time = 60 #Span of time for Temperature average
@@ -95,20 +95,22 @@ class Update_Data(threading.Thread):
         global new_Humidity
         global avg_temp_Data
         new_Temperature = 100 #sets initial temp to 100 so relay wont kick on while doing the average
-        new_Humidity = pull_Humidity()
-       
+        new_Humidity = 0
+        instance = dht.DHT11(pin=19)
         ## Loop to set initial data for temp Average. Time of loop is based on avg_Time
         i = 0
         avg_temp_Data = []
         print("\nGetting Average Temperature...Please Wait..")
         while (i < self.avg_Time):
-            get_Temp = pull_Temperature()
-            
-            if (int(get_Temp) > 32): #Eliminate values under 32, most common errors were 32 and 0
-                avg_temp_Data.append(get_Temp)
-                i += 1
-                print(str((self.avg_Time - i)) + " Temp: " + str(get_Temp)) # Debugging print, end will proball show just dots or just countdown
-                sleep(1)
+            result = instance.read()
+            if result.is_valid():
+                get_Temp = result.temperature
+                get_Temp = (get_Temp*(9/5)+32)
+                if (int(get_Temp) > 32): #Eliminate values under 32, most common errors were 32 and 0
+                    avg_temp_Data.append(get_Temp)
+                    i += 1
+                    print(str((self.avg_Time - i)) + " Temp: " + str(get_Temp)) # Debugging print, end will proball show just dots or just countdown
+                    sleep(1)
         new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data))) # Do initial Average
         os.system('clear')
         
@@ -126,18 +128,19 @@ class Update_Data(threading.Thread):
         ### Start Forever loop to keep temp and humidity updated.
         try:
             while True:
-
-                current_Temp = pull_Temperature() #pull current temp
-
-                if (int(current_Temp > 32)):
-                    avg_temp_Data.append(current_Temp)
-                    del avg_temp_Data[0]
-                    new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
-                    #print (new_Temperature)
+                result = instance.read()
+                if result.is_valid():
+                    current_Temp = result.temperature #pull current temp
+                    current_Temp = (current_Temp*(9/5)+32)
+                    if (int(current_Temp > 32)):
+                        avg_temp_Data.append(current_Temp)
+                        del avg_temp_Data[0]
+                        new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
+                        #print (new_Temperature)
      
                 ## Get current Humidity
 
-                current_Humidity = pull_Humidity()
+                current_Humidity = result.humidity
                 if (current_Humidity != False):
                     new_Humidity = current_Humidity
 
@@ -157,7 +160,7 @@ class Detect_Motion(threading.Thread):
         time_left = 0
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.pin, GPIO.IN)
-        time_prev = int(time.time())
+        time_prev = int(time())
         prev_set_Temp = set_Temp
         no_motion_delay = 900 # 15 Min
         temp_overriden = 0
@@ -165,13 +168,13 @@ class Detect_Motion(threading.Thread):
         try:
             while True:
                 i = GPIO.input(self.pin)
-                time_now = time.time()
+                time_now = time()
                 #print (i)
                 if (i == 0):
-                    time_prev = int(time.time())
+                    time_prev = int(time())
                     while ((i == 0) and (hold_Temp == 0)):
                         i = GPIO.input(self.pin)
-                        time_now = int(time.time())
+                        time_now = int(time())
                         time_left = ((time_prev + no_motion_delay) - time_now)
                         if ((time_now >= (time_prev + no_motion_delay)) and (temp_overriden == 0)):
                             prev_set_Temp = set_Temp
@@ -349,7 +352,7 @@ print("Current Set Temp is: ", set_Temp)
 try:
     while True:
         
-        time_now = int(time.time()) ## Keep current time updated for use in counter and motion sensor
+        time_now = int(time()) ## Keep current time updated for use in counter and motion sensor
                
         if (time_now >= (time_prev + main_print_delay)):
             ## Debug Messages
