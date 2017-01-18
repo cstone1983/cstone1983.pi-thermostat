@@ -215,11 +215,11 @@ def pull_Temp():
         if (isDataValid()):
             convertTemp()
             crc_OK=True;
-            ##print ("\r"),
-            ##printData();
-        
-            #sys.stderr.write("err")
-            #time.sleep(1);
+            print ("\r"),
+            printData();
+        else:
+            sys.stderr.write("err")
+            time.sleep(1);
 #}}}
 def pull_Temperature():
         pullData();
@@ -239,3 +239,4 @@ def pull_Humidity():
         return Humidity
     else:
         return 0
+
