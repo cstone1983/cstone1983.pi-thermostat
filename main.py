@@ -4,10 +4,10 @@ import threading
 from datetime import datetime
 import sys
 import dht
-from pushbullet import Pushbullet
 import numpy
 import os
 import lcddriver
+import http.client, urllib
 
 #Globals
 global relaypin
@@ -19,8 +19,9 @@ global set_Temp
 global backup_Temp
 global hold_Temp
 global display
-
-
+global string_Time
+global string_Info
+global end_Thread
 ## Setup Vars
 
 pin1 = 4 #Red LED
@@ -30,15 +31,15 @@ button1 = 21 # Button for decreses temp
 relaypin = 23 # Pin connected to relay
 pirpin = 5 # Pin connected to PIR
 relay_State = 0 # State of relay, so relay is not constantly being triggered on or off
-set_Temp = 63 # Temperature setpoint
+set_Temp = 63.5 # Temperature setpoint
 backup_Temp = 58 # used for no motion
 time_prev = int(time.time()) #used in delays
 main_print_delay = 60 # Used in main loop for time delay for print debug statement
 stop_button = 16
-avg_Time = 60 #Span of time for Temperature average
+avg_Time = 30 #Number of Temp Reads in array average
+avg_Delay = .4
 hold_Temp = 0
-display = lcddriver.lcd()
-display.lcd_clear()
+end_Thread = 0
 
 
 ## Setup GPIO
@@ -60,6 +61,7 @@ for i in buttonpins: # Setup buttons
 #################
 #Thread Classes
 #################
+
     
 class ButtonPush(threading.Thread):
     def __init__(self, pin, action):
@@ -67,27 +69,40 @@ class ButtonPush(threading.Thread):
         self.pin = pin
         self.action = action
     def run(self):
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)#
+        #GPIO.setmode(GPIO.BCM)
+        #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)#
        
         global set_Temp
-        while True:
-            #GPIO.setmode(GPIO.BCM)
-            #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) ##
-            #input_state = GPIO.input(pin)
-            if (GPIO.input(self.pin) == GPIO.LOW): ## Button to Increase The Set Temp Value
+        global end_Thread
+        global backup_Temp
+        global hold_Temp
+        while (end_Thread == 0):
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) ##
+            input_state = GPIO.input(self.pin)
+            if (input_state == 0): ## Button to Increase The Set Temp Value
                 
                 if (self.action == "up"):
                     set_Temp += 1
                 elif (self.action == "down"):
                     set_Temp -= 1
-                elif (self.action == "exit"):
-                    sys.exit()
-                    print("exit")
-                    
+                elif (self.action == "hold"):
+                    if (hold_Temp == 0):
+                        previous_Temp = int(set_Temp)
+                        hold_Temp = 1
+                        set_Temp = backup_Temp
+                    elif (hold_Temp == 1):
+                        hold_Temp = 0
+                        set_Temp = int(previous_Temp)
+                        
+                        
                 print("The Set Temp is Now", set_Temp)
-            time.sleep(.2)
-
+                time.sleep(.3)
+            else:
+                time.sleep(.1)
+        GPIO.cleanup()
+  
 class Update_Data(threading.Thread):
     def __init__(self, delay, avg_Time):
         threading.Thread.__init__(self)
@@ -98,25 +113,33 @@ class Update_Data(threading.Thread):
         global new_Temperature
         global new_Humidity
         global display
-        new_Temperature = 100 #sets initial temp to 100 so relay wont kick on while doing the average
+        global end_Thread
+        global avg_temp_Data
+        global avg_humidity_Data
+        new_Temperature = "Calc." #sets initial temp to 100 so relay wont kick on while doing the average
         new_Humidity = 0
         old_Temperature = 0
         instance = dht.DHT11(pin=19)
         ## Loop to set initial data for temp Average. Time of loop is based on avg_Time
         i = 0
         avg_temp_Data = []
+        avg_humidity_Data = []
         print("\nGetting Average Temperature...Please Wait..")
         while (i < self.avg_Time):
             result = instance.read() # Get sensor data from dht.py
             if result.is_valid():
                 get_Temp = result.temperature # move result to local var
                 get_Temp = (get_Temp*(9/5)+32) # convert to F - Will move to dht.py eventually
+                get_Humidity = result.humidity
+                avg_humidity_Data.append(get_Humidity)
                 if (int(get_Temp) > 32): #Eliminate values under 32, most common errors were 32 and 0
                     avg_temp_Data.append(get_Temp)
+                    print(str((self.avg_Time - i)) + " Temp: " + str(get_Temp) + " Humidity: " + str(get_Humidity)) # Debugging print, end will proball show just dots or just countdown
                     i += 1
-                    print(str((self.avg_Time - i)) + " Temp: " + str(get_Temp)) # Debugging print, end will proball show just dots or just countdown
-                    time.sleep(1)
+                    time.sleep(self.delay)
+                  
         new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data))) # Do initial Average
+        new_Humidity = float("{0:.2f}".format(numpy.mean(avg_humidity_Data)))
         os.system('clear')
         
 
@@ -132,7 +155,7 @@ class Update_Data(threading.Thread):
         
         ### Start Forever loop to keep temp and humidity updated.
         try:
-            while True:
+            while (end_Thread == 0):
                 result = instance.read()
                 if result.is_valid():
                     current_Temp = result.temperature #pull current temp
@@ -148,12 +171,18 @@ class Update_Data(threading.Thread):
 
                 current_Humidity = result.humidity
                 if (current_Humidity != False):
-                    new_Humidity = current_Humidity
+                    avg_humidity_Data.append(current_Humidity)
+                    del avg_humidity_Data[0]
+                    new_Humidity = float("{0:2f}".format(numpy.mean(avg_humidity_Data)))
             
                 time.sleep(self.delay) # Sleep delay between readings, usually 1sec
 
         except (KeyboardInterrupt, SystemExit):
+            GPIO.setmode(GPIO.BCM)
             GPIO.cleanup()
+        GPIO.cleanup()
+        menu.join()
+        
 class Detect_Motion(threading.Thread):
     def __init__(self, pin, delay):
         threading.Thread.__init__(self)
@@ -164,8 +193,11 @@ class Detect_Motion(threading.Thread):
         global backup_Temp
         global time_left
         global hold_Temp
+        global end_Thread
+        global string_Time
         time_left = 0
         GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
         GPIO.setup(self.pin, GPIO.IN)
         time_prev = int(time.time())
         prev_set_Temp = set_Temp
@@ -173,39 +205,41 @@ class Detect_Motion(threading.Thread):
         temp_overriden = 0 #used so set_temp only gets changed once
         
         try:
-            while True:
+            while (end_Thread == 0):
+                GPIO.setmode(GPIO.BCM)
                 i = GPIO.input(self.pin)
                 time_now = time.time()
-                #print (i)
+                print (str(i) + " " + str(hold_Temp))
                 if (i == 0):
                     time_prev = int(time.time())
                     while ((i == 0) and (hold_Temp == 0)):
                         i = GPIO.input(self.pin)
                         time_now = int(time.time())
-                        
+                        print(time_left)
                         time_left = ((time_prev + no_motion_delay) - time_now)
                         if ((time_now >= (time_prev + no_motion_delay)) and (temp_overriden == 0)):
                             prev_set_Temp = set_Temp
                             set_Temp = backup_Temp
                             temp_overriden = 1
-                            print("No Motion, Temp Set to: " + str(backup_Temp))
-                            send_Notification("Living Room", ("No Motion, Temp set to: " + str(backup_Temp)), "send")
+                            print("\n" + string_Time + " No Motion, Temp Set to: " + str(backup_Temp))
+                            send_Notification("Living Room", ("No Motion, Temp set to: " + str(backup_Temp)))
                         time.sleep(1) 
                 elif ((i == 1) and (hold_Temp == 0)):
                     if (temp_overriden == 1):
                         set_Temp = prev_set_Temp
-                        print("Motion Detected, Returning Temp to: " + str(prev_set_Temp))
-                        send_Notification("Living Room", ("Motion Detected, Temp Returned to: " + str(prev_set_Temp)), "send")
+                        print("\n" + string_Time + " Motion Detected, Returning Temp to: " + str(prev_set_Temp))
+                        send_Notification("Living Room", ("Motion Detected, Temp Returned to: " + str(prev_set_Temp)))
                         temp_overriden = 0
                     motion_detect = 1
                     #print("Detected Motion")
                     
                     time.sleep(1)
-                #print (i)
+                print (str(i) + " " + str(hold_Temp))
                 time.sleep(.1)
         except(KeyboardInterrupt, SystemExit):
+            GPIO.setmode(GPIO.BCM)
             GPIO.cleanup()        
-
+    GPIO.cleanup()
 class Menu_System(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -213,19 +247,28 @@ class Menu_System(threading.Thread):
     def run(self):
         global set_Temp
         global new_Temperature
-        global relay_State
         global backup_Temp
         global time_left
         global string_Time
-        print(string_Time + " Current Temp is: " + str(new_Temperature) + "F and Temp is set to: " + str(set_Temp))
-        while True:
-            
+        global hold_Temp
+        global end_Thread
+        global avg_temp_Data
+        global avg_humidity_Data
+        screen_print()
+        while (end_Thread == 0):
+            print(screen_print())
             action = input("\nWhat do you want to do: ")
 
             if (action == "temp"):
                 do_this = input("What Temperature do you want to change to: ")
-                set_Temp = int(do_this)
-                print("Temp Changed to: " + str(set_Temp))
+                try:
+                    if (float(do_this) > 50 and float(do_this) < 80):
+                        set_Temp = float(do_this)
+                        print("Temp Changed to: " + str(set_Temp))
+                    else:
+                        print("Not a valid Temp")
+                except:
+                    print("Invalid entry")
             elif (action == "help"):
                 print("\n------------------")
                 print("temp - Change Set Temperature")
@@ -234,7 +277,7 @@ class Menu_System(threading.Thread):
                 print("motion - Time left before motion timeout")
                 print("exit - exit thermostat")
             elif (action == "info"):
-                print(string_Time + " Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + "% Thermostat is set at: " + str(set_Temp) + "F Time is: ")
+                print(screen_print())
             elif (action == "backup temp"):
                 do_this = input("Change Backup Temp to: ")
                 backup_Temp = int(backup_Temp)
@@ -248,20 +291,25 @@ class Menu_System(threading.Thread):
                 if (do_this == "yes"):
                     hold_Temp = 1
                     hold_Temp_at = input("What do you want to hold the time at? ")
-                    previous_Temp = int(set_Temp)
-                    set_Temp = int(hold_Temp_at)
-                    print("\nTemp Set to " + str(set_Temp) + " and will be help here untill set otherwise.")
+                    previous_Temp = float(set_Temp)
+                    set_Temp = float(hold_Temp_at)
+                    print("\nTemp Set to " + str(set_Temp) + " and will be held here untill set otherwise.")
                 elif (do_this == "no"):
                     hold_Temp = 0
-                    set_Temp = int(previous_Temp)
+                    set_Temp = float(previous_Temp)
                     print("\nTemp Returning to previously set - " + str(set_Temp))
-                    
+            elif (action == "notify"):
+                send_Notification("test", screen_print())
+                
+            elif (action == "data"):
+                print(avg_temp_Data)
+                print("\n" + str(avg_humidity_Data))
             elif (action == "exit"):
-                GPIO.cleanup()
-                sys.exit()
-          
+                send_Notification("Living Room", "Thermostat App Closing")
+                end_Thread = 1
+        
             action = 0
-
+        GPIO.cleanup()
 ####################
 ## Functions
 ####################
@@ -269,46 +317,72 @@ class Menu_System(threading.Thread):
 
 def relay_On(pin):
     global relay_State
-    
-    if (relay_State == 0):
-        print("Relay ON")
-        GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setwarnings(False)
+    try:
         GPIO.output(pin, GPIO.HIGH)
-        #GPIO.output(ledpin, GPIO.HIGH)
         relay_State = 1
-          
-        send_Notification("Living Room", ("Heater is on and the Temp is: " + str(new_Temperature)), 'send')
-        
-        print("\nCurrent Temp is: " + str(new_Temperature) + " F" + "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp) + str(string_Time))
-    elif (relay_State == 1):
-        print("Relay Already ON")
-        
+    except:
+        print("Error Starting Relay")
+        relay_State = 0
+
+
 def relay_Off(pin):
     global relay_State
-    if (relay_State == 1):
-        print("Relay OFF")
-        GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setwarnings(False)
+    try:
         GPIO.output(pin, GPIO.LOW)
         relay_State = 0
-        send_Notification("Living Room", ("Heater is off and Temp is: " + str(new_Temperature)), 'send')
-        print("Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp) + str(string_Time))
+    except:
+        print("Error Stopping Relay")
+        relay_State = 1
+        
+
+def send_Notification(title, body):
+   
+    conn = http.client.HTTPSConnection("api.pushover.net:443")
+    conn.request("POST", "/1/messages.json",
+      urllib.parse.urlencode({
+            "token": "awmq2qh4qoijvztozwuvte5qdbikhm",
+            "user": "u9yffbyi7ppxhcw79xwfwg5afhszk2",
+            "message": body,
+        }), { "Content-type": "application/x-www-form-urlencoded" })
+    conn.getresponse()
+def log_Info(message):
+    global relay_State
+    global string_Time
+    global new_Temperature
+    global new_Humidity
+
+    
+    
+    
+def screen_print():
+    global relay_State
+    if (relay_State == 1):
+            string_Info = str("\n" + string_Time + " - Relay ON  - " + "Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
+            
     elif (relay_State == 0):
-        print("Relay Already OFF")
+
+            string_Info = str("\n" + string_Time + " - Relay OFF - " + "Current Temp is: " + str(new_Temperature) + " F"+ "  Humidity is: " + str(new_Humidity) + " Thermostat is set at: " + str(set_Temp))
+    return string_Info
+
+    print(string_Info)
+############################################
+## Setup Display
+############################################
+display = lcddriver.lcd()
+display.lcd_clear()
+    
+print("Current Set Temp is: ", set_Temp)
 
 
- 
-def send_Notification(title, body, action):
-    pb = Pushbullet('o.YYc1GgqyrOCPj1peMzmYaoI0aJw7YLyI')
-    data = {
-        'type':'note',
-        'title':title,
-        'body':body
-        }
-    #resp = requests.post('https://api.pushbullet.com/api/pushes',data=data, auth=(API_KEY,''))
-    if (action == 'send'):
-        push = pb.push_note(title, body)
-    if (action == 'clear'):
-        push = pb.delete_pushes()
+
+
+
 ###############
 #Call Button Threads
 ###############
@@ -316,9 +390,9 @@ def send_Notification(title, body, action):
 try:
     up_button = ButtonPush(button1, "up")
     down_button = ButtonPush(button2, "down")
-    end_button = ButtonPush(stop_button, "exit")
+    hold_button = ButtonPush(stop_button, "hold")
     down_button.start()
-    end_button.start()
+    hold_button.start()
     up_button.start()
     
 except:
@@ -328,7 +402,7 @@ except:
 ## Here to start thread for temp/humidity monitoring
 ###############################
 try:
-    Data = Update_Data(1, avg_Time)
+    Data = Update_Data(avg_Delay, avg_Time)
     Data.start()
 #    Data.join()
 except:
@@ -346,52 +420,73 @@ except:
 
 
     
-############################################
-## Opening Print to show current Setting
-############################################
-## Eventually Will Show to LCD or whatever display
-    
-print("Current Set Temp is: ", set_Temp)
-
-display.lcd_display_string("Temp: Calc.", 1)
 
 ##########################
 ## Main Loop
 ##########################
+
 try:
-    while True:
-        global string_Time
-        now = datetime.now()
-        string_Time = now.strftime('%I:%M:%S')
-        ## Setup Display
+    while (end_Thread == 0):
         
+        now = datetime.now()
+        string_Time = now.strftime('%b-%d-%I:%M:%S')
+        
+        ## Update Display
+        if (relay_State == 1):
+            heat_State = "    ON"
+        elif (relay_State == 0):
+            heat_State = "   OFF"
         try:
-            show2 = str("Set: " + str(set_Temp))
-            show1 = str("Temp: " + str(new_Temperature))
-            display.lcd_display_string(show1, 1)
-            display.lcd_display_string(show2, 2)
+            if (hold_Temp == 0):
+                show2 = str("Set: " + str(set_Temp) + " " + str(heat_State))
+                show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
+                display.lcd_display_string(show1, 1)
+                display.lcd_display_string(show2, 2)
+            elif (hold_Temp == 1):
+                show2 = str("Temp Hold: " + str(set_Temp) + "         ")
+                show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
+                display.lcd_display_string(show1, 1)
+                display.lcd_display_string(show2, 2)                
+            
         except:
             print("Display error")
             display = lcddriver.lcd()
             display.lcd_clear()
+
         time_now = int(time.time()) ## Keep current time updated for use in counter and motion sensor
         
-       
-        if ((new_Temperature > set_Temp) and (relay_State == 1)):
-
-                relay_Off(relaypin)
-                display.lcd_clear()
-        elif (( (new_Temperature + .5) < set_Temp) and (relay_State == 0) and (new_Temperature != False)):
-  
-            relay_On(relaypin)
-            display.lcd_clear()
-                
-        time.sleep(1)        
+        if (new_Temperature != "Calc."):
+            if (( (float(new_Temperature) + .5) < float(set_Temp)) and (relay_State == 0)):
+                try:
+                    relay_On(relaypin)
+                    print(screen_print())
+                    send_Notification("Living Room", ("Heater is -ON- and the Temp is: " + str(new_Temperature)))
+                    
+                except:
+                    print("\nError Starting Relay")
+            elif ((float(new_Temperature) > float(set_Temp)) and (relay_State == 1)):
+                try:
+                    relay_Off(relaypin)
+                    send_Notification("Living Room", ("Heater is -OFF- and Temp is: " + str(new_Temperature)))
+                    print(screen_print())
+                except:
+                    print("\nError Stopping Relay")
+                    
+        time.sleep(.1)        
 
         
 
 
 except (KeyboardInterrupt, SystemExit):
-    send_Notification("Living Room", "Thermostat App Closing", "send")
+    send_Notification("Living Room", "Thermostat App Closing")
+    GPIO.setmode(GPIO.BCM)
     GPIO.cleanup()
-    
+print("Exiting...")
+GPIO.cleanup()
+up_button.join()
+down_button.join()
+hold_button.join()
+motion.join()
+Data.join()
+
+sys.exit()
