@@ -1,5 +1,6 @@
 import time
 import RPi
+import RPi.GPIO as GPIO
 
 
 class DHT11Result:
@@ -31,6 +32,7 @@ class DHT11:
         self.__pin = pin
 
     def read(self):
+        GPIO.setmode(GPIO.BCM)
         RPi.GPIO.setup(self.__pin, RPi.GPIO.OUT)
 
         # send initial high
