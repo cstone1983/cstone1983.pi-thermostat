@@ -1,4 +1,5 @@
 import RPi.GPIO as GPIO
+from gpiozero import MotionSensor
 import time
 import threading
 from datetime import datetime
@@ -23,41 +24,36 @@ global display
 global string_Time
 global string_Info
 global end_Thread
-## Setup Vars
 
-pin1 = 4 #Red LED
-buttonpins = [20, 21] # Switch 1,2 used for Temp Up and Down
-button2 = 20 #button for increase temp
-button1 = 21 # Button for decreses temp
+
+## Setup Vars
+#Pin Numbers, Temp Sensor set in dht.py, lcd pins set in lcddriver
 relaypin = 23 # Pin connected to relay
-pirpin = 5 # Pin connected to PIR
+pirpin = 20 # Pin connected to PIR
+
+
 relay_State = 0 # State of relay, so relay is not constantly being triggered on or off
+
+
+## To Remove, will pull from DB always
 set_Temp = 64.5 # Temperature setpoint
+
+## To Remove, will pull from DB always
 backup_Temp = 58 # used for no motion
 time_prev = int(time.time()) #used in delays
-main_print_delay = 60 # Used in main loop for time delay for print debug statement
-stop_button = 16
 avg_Time = 30 #Number of Temp Reads in array average
-avg_Delay = 1
-hold_Temp = 0
-end_Thread = 0
+avg_Delay = 1 # Delay between temp readings
+hold_Temp = 0 #used to hold temp from user input
+hold = 0
+end_Thread = 0 # Helps to end active threads
 
 
 ## Setup GPIO
 GPIO.setmode(GPIO.BCM) # Board Setup
-
-GPIO.setup(pin1, GPIO.OUT) #LED Setup
-
 GPIO.setup(relaypin, GPIO.OUT) ## Relay SETUP
-
-GPIO.setup(pirpin, GPIO.IN) # PIR Setup
-
 GPIO.output(relaypin, GPIO.LOW) ## Relay SETUP
-
 GPIO.setwarnings(False)
 
-for i in buttonpins: # Setup buttons
-    GPIO.setup(i, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 ## SQLite Connection
 
@@ -68,46 +64,6 @@ c = conn.cursor()
 #Thread Classes
 #################
 
-    
-class ButtonPush(threading.Thread):
-    def __init__(self, pin, action):
-        threading.Thread.__init__(self)
-        self.pin = pin
-        self.action = action
-    def run(self):
-        #GPIO.setmode(GPIO.BCM)
-        #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)#
-       
-        global set_Temp
-        global end_Thread
-        global backup_Temp
-        global hold_Temp
-        while (end_Thread == 0):
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-            GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) ##
-            input_state = GPIO.input(self.pin)
-            if (input_state == 0): ## Button to Increase The Set Temp Value
-                
-                if (self.action == "up"):
-                    set_Temp += 1
-                elif (self.action == "down"):
-                    set_Temp -= 1
-                elif (self.action == "hold"):
-                    if (hold_Temp == 0):
-                        previous_Temp = int(set_Temp)
-                        hold_Temp = 1
-                        set_Temp = backup_Temp
-                    elif (hold_Temp == 1):
-                        hold_Temp = 0
-                        set_Temp = int(previous_Temp)
-                        
-                        
-                print("The Set Temp is Now", set_Temp)
-                time.sleep(.3)
-            else:
-                time.sleep(.1)
-        GPIO.cleanup()
   
 class Update_Data(threading.Thread):
     def __init__(self, delay, avg_Time):
@@ -118,10 +74,10 @@ class Update_Data(threading.Thread):
     def run(self):
         global new_Temperature
         global new_Humidity
-        global display
         global end_Thread
         global avg_temp_Data
         global avg_humidity_Data
+        global relay_State
 
         #### SQlite connection
         conn = lite.connect('thermostat.db')
@@ -130,7 +86,7 @@ class Update_Data(threading.Thread):
         
         new_Temperature = "Calc." #sets initial temp to 100 so relay wont kick on while doing the average
         new_Humidity = 0
-        old_Temperature = 0
+        prev_time = int(time.time())
         instance = dht.DHT11(pin=19)
         ## Loop to set initial data for temp Average. Time of loop is based on avg_Time
         i = 0
@@ -162,130 +118,230 @@ class Update_Data(threading.Thread):
         
             menu = Menu_System()
             menu.start()
+            
         except:
             print("Error Starting User Input")
         
         ### Start Forever loop to keep temp and humidity updated.
-        try:
-            while (end_Thread == 0):
-                result = instance.read()
-                if result.is_valid():
-                    current_Temp = result.temperature #pull current temp
-                    current_Temp = (current_Temp*(9/5)+32)
-                    if (int(current_Temp > 32)):
-                        avg_temp_Data.append(current_Temp)
-                        del avg_temp_Data[0]
-                        new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
-                        try:
-                            c.execute("UPDATE settings SET temp = ? WHERE zone = 'living'", (new_Temperature,))
-                            conn.commit()
-                        except:
-                            print("Database Error")
-                        conn.commit()
-                        #print (new_Temperature)
-                    
-                        
-                ## Get current Humidity
-
-                current_Humidity = result.humidity
-                if (current_Humidity != False):
-                    avg_humidity_Data.append(current_Humidity)
-                    del avg_humidity_Data[0]
-                    new_Humidity = float("{0:2f}".format(numpy.mean(avg_humidity_Data)))
+        while (end_Thread == 0):
+            result = instance.read()
+            if result.is_valid():
+                current_Temp = result.temperature #pull current temp
+                current_Temp = (current_Temp*(9/5)+32) # Convert Temp to F
+                if (int(current_Temp > 32)):
+                    avg_temp_Data.append(current_Temp)
+                    del avg_temp_Data[0]
                     new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
+                    
                     try:
-                        c.execute("UPDATE settings SET humidity = ? WHERE zone = 'living'", (new_Humidity,))
+                        c.execute("UPDATE settings SET temp = ? WHERE zone = 'living'", (new_Temperature,))
                         conn.commit()
                     except:
-                            print("Database Error")
-                time.sleep(self.delay) # Sleep delay between readings, usually 1sec
-            
-        except (KeyboardInterrupt, SystemExit):
-            GPIO.setmode(GPIO.BCM)
-            GPIO.cleanup()
+                        print("Database Error in Temp Data Update")
+                        conn = lite.connect('thermostat.db')
+                        c = conn.cursor()
+                    conn.commit()
+                                            
+            ## Get current Humidity
+
+            current_Humidity = result.humidity
+            if (current_Humidity != False):
+                avg_humidity_Data.append(current_Humidity)
+                del avg_humidity_Data[0]
+                new_Humidity = float("{0:2f}".format(numpy.mean(avg_humidity_Data)))
+                new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
+                try:
+                    c.execute("UPDATE settings SET humidity = ? WHERE zone = 'living'", (new_Humidity,))
+                    conn.commit()
+                except:
+                        print("Database Error in Humidity Data Update")
+                        conn = lite.connect('thermostat.db')
+                        c = conn.cursor()
+            try:
+                time_now = int(time.time())
+                if (time_now > (prev_time + 10)): 
+                    c.execute("INSERT INTO data (zone, time, temp, humidity, heat) VALUES (?, ?, ?, ?, ?)", ('living', time_now, new_Temperature, new_Humidity, relay_State))
+                    conn.commit()
+                    prev_time = time_now
+            except:
+                print("Error Updating Data Table")
+            time.sleep(self.delay) # Sleep delay between readings, usually 1sec
+        
+
         GPIO.cleanup()
         menu.join()
-        
+
+class DB_Modify(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+
+    def run(self):
+        global set_Temp
+        global backup_Temp
+        global end_Thread
+        global hold_Temp
+        global temp_overriden
+        global last_motion
+        global hold
+        motion_Held = 0
+        previous_Temp = backup_Temp
+        conn = lite.connect('thermostat.db')
+        c = conn.cursor()
+        user_held = 0
+        while (end_Thread == 0):
+            try:
+
+                c.execute("SELECT settemp, backuptemp, hold, holdtemp, lastmotion, motion FROM settings WHERE zone = 'living'")
+                row = c.fetchone()
+
+                
+                backup_Temp = float(row[1])
+                hold_Temp = int(row[3])
+                last_motion = int(row[4])
+                motion = int(row[5])
+                hold = int(row[2])
+               
+             
+                if ((motion == 1) and (motion_Held == 0) and (hold == 0) and (user_held == 0)):
+                    set_Temp = float(row[0])
+                if ((hold == 1) and (user_held == 0)): ## User Holds (priority over no motion hold)
+                    previous_Temp = set_Temp
+                    user_held = 1
+                    set_Temp = hold_Temp
+                    c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (set_Temp,))
+                    conn.commit()
+                    send_Notification("Living Room", ("User Held Temp to: " + str(hold_Temp)))
+                elif((hold == 0) and (user_held == 1)):
+                    set_Temp = previous_Temp
+                    user_held = 0
+                    c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (set_Temp,))
+                    conn.commit()
+                    send_Notification("Living Room", ("User Restored Temp to: " + str(set_Temp)))                    
+                    
+                elif((hold == 0) and (user_held == 0)): ## Hold for no motion
+                        
+                    if ((motion == 0) and (motion_Held == 0)):
+                        motion_Held = 1
+                        previous_Temp = set_Temp
+                        set_Temp = backup_Temp
+                        c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (set_Temp,))
+                        conn.commit()
+                        send_Notification("Living Room", ("Motion Held to: " + str(set_Temp)))
+                        
+                        print("Temp Held")
+                    if ((motion == 1) and (motion_Held == 1)):
+                        motion_Held = 0
+                        set_Temp = previous_Temp
+                        c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (set_Temp,))
+                        conn.commit()
+                        send_Notification("Living Room", ("Motion Restored Temp to: " + str(set_Temp)))
+                    
+                    
+                
+                time.sleep(.2)
+            except:
+                print("DB Error in DB_Modify")
+                conn = lite.connect('thermostat.db')
+                c = conn.cursor()
+                time.sleep(1)
+
 class Detect_Motion(threading.Thread):
     def __init__(self, pin, delay):
         threading.Thread.__init__(self)
         self.pin = pin
         self.delay = delay
     def run(self):
-        global set_Temp
-        global backup_Temp
         global time_left
         global hold_Temp
         global end_Thread
         global string_Time
-
+        global last_motion
         #### SQlite connection
         conn = lite.connect('thermostat.db')
         c = conn.cursor()
 
-        
+
         time_left = 0
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
-        GPIO.setup(self.pin, GPIO.IN)
+        #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        pir=MotionSensor(self.pin)        
         time_prev = int(time.time())
         prev_set_Temp = set_Temp
         no_motion_delay = 900 # 15 Min
         temp_overriden = 0 #used so set_temp only gets changed once
         x = 0
         avg_Motion_data = []
-        while (x < 5):
-            i = GPIO.input(self.pin)
+        while (x < 10):
+            
+            if (pir.is_active == True):
+                i = 1
+            elif (pir.is_active == False):
+                i = 0
+                
+            #i = GPIO.input(self.pin)
             avg_Motion_data.append(i)
             time.sleep(1)
             x += 1
 
-        try:
-            while (end_Thread == 0):
-                GPIO.setmode(GPIO.BCM)
-                i = GPIO.input(self.pin)
-                avg_Motion_data.append(i)
-                del avg_Motion_data[0]
-                motion = sum(avg_Motion_data)
-                time_now = time.time()
-             
-                ### NO Motion
-                if (motion < 3):
-                    time_prev = int(time.time())
-                    while ((motion < 2) and (hold_Temp == 0)):
-                        i = GPIO.input(self.pin)
-                        avg_Motion_data.append(i)
-                        del avg_Motion_data[0]
-                        motion = sum(avg_Motion_data)
-                        time_now = int(time.time())
-                        time_left = ((time_prev + no_motion_delay) - time_now)
-                        if ((time_now >= (time_prev + no_motion_delay)) and (temp_overriden == 0)):
-                            prev_set_Temp = set_Temp
-                            set_Temp = backup_Temp
-                            temp_overriden = 1
-                            print("\n" + string_Time + " No Motion, Temp Set to: " + str(backup_Temp))
-                            send_Notification("Living Room", ("No Motion, Temp set to: " + str(backup_Temp)))
-                        time.sleep(1)
-
-                ## Motion Detected
-                elif ((motion >= 3) and (hold_Temp == 0)):
-                    time_now = int(time.time())
-                    try:
-                        c.execute("UPDATE settings SET lastmotion = ? WHERE zone = 'living'", (time_now,))
-                        conn.commit()
-                    except:
-                        print("Database Error")
-                    if (temp_overriden == 1):
-                        set_Temp = prev_set_Temp
-                        print("\n" + string_Time + " Motion Detected, Returning Temp to: " + str(prev_set_Temp))
-                        send_Notification("Living Room", ("Motion Detected, Temp Returned to: " + str(prev_set_Temp)))
-                        temp_overriden = 0
-                    motion_detect = 1
-                    time.sleep(1)
-                time.sleep(.2)
-        except(KeyboardInterrupt, SystemExit):
+    
+        while (end_Thread == 0):
+            #pir=MotionSensor(self.pin)
             GPIO.setmode(GPIO.BCM)
-            GPIO.cleanup()        
+            #i = GPIO.input(self.pin)
+            if (pir.is_active == True):
+                i = 1
+            elif (pir.is_active == False):
+                i = 0
+            avg_Motion_data.append(i)
+            del avg_Motion_data[0]
+            motion = sum(avg_Motion_data)
+            time_now = time.time()
+
+            ## Motion Detected
+            if ((motion > 5)):
+                time_now = int(time.time())
+                
+                try:
+                    c.execute("UPDATE settings SET lastmotion = ? WHERE zone = 'living'", (time_now,))
+                    c.execute("UPDATE settings set motion = 1 WHERE zone = 'living'")
+                    conn.commit()
+                except:
+                    print("Database Error in Motion Update")
+                    conn = lite.connect('thermostat.db')
+                    c = conn.cursor()
+                
+                motion_detect = 1
+                
+            ### NO Motion
+            elif ((motion <= 5)):
+                
+                while ((motion < 5)):
+                    if (pir.is_active == True):
+                        i = 1
+                    elif (pir.is_active == False):
+                        i = 0
+                    avg_Motion_data.append(i)
+                    del avg_Motion_data[0]
+                    motion = sum(avg_Motion_data)
+                    time_now = int(time.time())
+                    time_left = ((last_motion + no_motion_delay) - time_now)
+                    if ((time_now >= (last_motion + no_motion_delay))):
+                        
+                        try:
+                            c.execute("UPDATE settings SET motion = 0 WHERE zone = 'living'")
+                            conn.commit()
+                        except:
+                            print("Database Error in Motion Update")
+                            conn = lite.connect('thermostat.db')
+                            c = conn.cursor()
+                time.sleep(1)
+
+            
+
+           
+                
+            time.sleep(.2)
     GPIO.cleanup()
 class Menu_System(threading.Thread):
     def __init__(self):
@@ -302,6 +358,8 @@ class Menu_System(threading.Thread):
         global avg_temp_Data
         global avg_humidity_Data
         screen_print()
+        conn = lite.connect('thermostat.db')
+        c = conn.cursor()
         while (end_Thread == 0):
             print(screen_print())
             action = input("\nWhat do you want to do: ")
@@ -327,8 +385,13 @@ class Menu_System(threading.Thread):
                 print(screen_print())
             elif (action == "backup temp"):
                 do_this = input("Change Backup Temp to: ")
-                backup_Temp = int(backup_Temp)
-                backup_Temp = int(do_this)
+                backup_Temp = float(do_this)
+                try:
+                    conn = lite.connect('thermostat.db')
+                    c = conn.cursor()
+                    c.execute("UPDATE settings SET backuptemp = ? WHERE zone = 'living'", (backup_Temp,))
+                except:
+                    print("DB Error in DB_Modify")
             elif (action == "motion"):
                 time_left_min = int(time_left / 60)
                 time_left_sec = time_left - (time_left_min * 60)
@@ -336,15 +399,14 @@ class Menu_System(threading.Thread):
             elif (action == "hold"):
                 do_this = input("Do you want to hold the temp?(yes/no)")
                 if (do_this == "yes"):
-                    hold_Temp = 1
                     hold_Temp_at = input("What do you want to hold the time at? ")
-                    previous_Temp = float(set_Temp)
-                    set_Temp = float(hold_Temp_at)
-                    print("\nTemp Set to " + str(set_Temp) + " and will be held here untill set otherwise.")
+                    c.execute("UPDATE settings SET holdtemp = ? WHERE zone = 'living'", (hold_Temp_at,))
+                    c.execute("UPDATE settings SET hold = 1 WHERE zone = 'living'")
+                    conn.commit()
+                    time.sleep(1)
                 elif (do_this == "no"):
-                    hold_Temp = 0
-                    set_Temp = float(previous_Temp)
-                    print("\nTemp Returning to previously set - " + str(set_Temp))
+                    c.execute("UPDATE settings SET hold = 0 WHERE zone = 'living'")
+                    conn.commit()
             elif (action == "notify"):
                 send_Notification("test", screen_print())
                 
@@ -356,28 +418,30 @@ class Menu_System(threading.Thread):
                 end_Thread = 1
         
             action = 0
-        GPIO.cleanup()
+        
 ####################
 ## Functions
 ####################
-##
-##def SQ_Query(action, table, field, data):
-##    if (table == 'settings'):
-##        if (action == 'update'):
-##            c.execute('UPDATE settings SET )
-##            conn.commit()
-##        
+
 def relay_On(pin):
     global relay_State
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
     GPIO.setwarnings(False)
+    conn = lite.connect('thermostat.db')
+    c = conn.cursor()
     try:
         GPIO.output(pin, GPIO.HIGH)
         relay_State = 1
+        try:
+            c.execute("UPDATE settings SET relay = ? WHERE zone = 'living'", (relay_State,))
+            conn.commit()
+        except:
+            print("Database Error in Relay ON")
     except:
         print("Error Starting Relay")
         relay_State = 0
+    
 
 
 def relay_Off(pin):
@@ -385,9 +449,17 @@ def relay_Off(pin):
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
     GPIO.setwarnings(False)
+    conn = lite.connect('thermostat.db')
+    c = conn.cursor()
     try:
         GPIO.output(pin, GPIO.LOW)
         relay_State = 0
+        try:
+            c.execute("UPDATE settings SET relay = ? WHERE zone = 'living'", (relay_State,))
+            conn.commit()
+        except:
+            print("Database Error in Relay ON")
+            
     except:
         print("Error Stopping Relay")
         relay_State = 1
@@ -433,17 +505,17 @@ print("Current Set Temp is: ", set_Temp)
 ###############
 #Call Button Threads
 ###############
-
-try:
-    up_button = ButtonPush(button1, "up")
-    down_button = ButtonPush(button2, "down")
-    hold_button = ButtonPush(stop_button, "hold")
-    down_button.start()
-    hold_button.start()
-    up_button.start()
-    
-except:
-    print("Error Starting Buttons")
+##
+##try:
+##    up_button = ButtonPush(button1, "up")
+##    down_button = ButtonPush(button2, "down")
+##    hold_button = ButtonPush(stop_button, "hold")
+##    down_button.start()
+##    hold_button.start()
+##    up_button.start()
+##    
+##except:
+##    print("Error Starting Buttons")
 
 ###############################
 ## Here to start thread for temp/humidity monitoring
@@ -454,6 +526,12 @@ try:
 #    Data.join()
 except:
     print ("Error Starting Temp Update")
+
+try:
+    DB = DB_Modify()
+    DB.start()
+except:
+    print("Error Starting DB Update")
 
 #################################
 ##Start Motion Detection
@@ -482,18 +560,15 @@ try:
         if (relay_State == 1):
             heat_State = "    ON"
         elif (relay_State == 0):
-            heat_State = "    OFF"
+            heat_State = "   OFF"
         try:
-            if (hold_Temp == 0):
+            if (hold == 1):
+                show2 = str("Held At:  " + str(hold_Temp) + " " + str(heat_State))
+            elif (hold == 0):
                 show2 = str("Set: " + str(set_Temp) + " " + str(heat_State))
-                show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
-                display.lcd_display_string(show1, 1)
-                display.lcd_display_string(show2, 2)
-            elif (hold_Temp == 1):
-                show2 = str("Temp Hold: " + str(set_Temp) + "         ")
-                show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
-                display.lcd_display_string(show1, 1)
-                display.lcd_display_string(show2, 2)                
+            show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
+            display.lcd_display_string(show1, 1)
+            display.lcd_display_string(show2, 2)
             
         except:
             print("Display error")
@@ -507,14 +582,14 @@ try:
                 try:
                     relay_On(relaypin)
                     print(screen_print())
-                    send_Notification("Living Room", ("Heater is -ON- and the Temp is: " + str(new_Temperature)))
+                    #send_Notification("Living Room", ("Heater is -ON- and the Temp is: " + str(new_Temperature)))
                     
                 except:
                     print("\nError Starting Relay")
             elif ((float(new_Temperature) > float(set_Temp)) and (relay_State == 1)):
                 try:
                     relay_Off(relaypin)
-                    send_Notification("Living Room", ("Heater is -OFF- and Temp is: " + str(new_Temperature)))
+                    #send_Notification("Living Room", ("Heater is -OFF- and Temp is: " + str(new_Temperature)))
                     print(screen_print())
                 except:
                     print("\nError Stopping Relay")
@@ -530,9 +605,7 @@ except (KeyboardInterrupt, SystemExit):
     GPIO.cleanup()
 print("Exiting...")
 GPIO.cleanup()
-up_button.join()
-down_button.join()
-hold_button.join()
+
 motion.join()
 Data.join()
 
