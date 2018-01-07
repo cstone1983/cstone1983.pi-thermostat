@@ -169,7 +169,7 @@ class Update_Data(threading.Thread):
         
 
         GPIO.cleanup()
-        menu.join()
+        print("Ending Update Data")
 
 class DB_Modify(threading.Thread):
     def __init__(self):
@@ -244,6 +244,8 @@ class DB_Modify(threading.Thread):
                 conn = lite.connect('thermostat.db')
                 c = conn.cursor()
                 time.sleep(1)
+        GPIO.cleanup()
+        print("Ending DB Modify")
 
 class Detect_Motion(threading.Thread):
     def __init__(self, pin, delay):
@@ -342,7 +344,9 @@ class Detect_Motion(threading.Thread):
            
                 
             time.sleep(.2)
-    GPIO.cleanup()
+        GPIO.cleanup()
+        print("Ending Motion")
+        
 class Menu_System(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -418,7 +422,7 @@ class Menu_System(threading.Thread):
                 end_Thread = 1
         
             action = 0
-        
+        print("Ending Menu")        
 ####################
 ## Functions
 ####################
@@ -596,8 +600,13 @@ try:
                     
         time.sleep(.1)        
 
-        
-
+    print("Ending Main Loop")
+    print("Exiting...")
+    
+    motion.join()
+    Data.join()
+    menu.join()
+    exit()
 
 except (KeyboardInterrupt, SystemExit):
     send_Notification("Living Room", "Thermostat App Closing")
@@ -608,5 +617,5 @@ GPIO.cleanup()
 
 motion.join()
 Data.join()
-
+menu.join()
 sys.exit()
