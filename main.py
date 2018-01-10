@@ -344,6 +344,7 @@ class Detect_Motion(threading.Thread):
            
                 
             time.sleep(.2)
+        GPIO.setmode(GPIO.BCM)
         GPIO.cleanup()
         print("Ending Motion")
         
