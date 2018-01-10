@@ -74,10 +74,10 @@ down = Button(temp_control, text="Temp Down", command=temp_down, height=5, width
 close = Button(header, text="Exit", command=end, height=5, width=5)
 temp = Label(temp_control, text=0, width=5)
 
-close.pack()
-up.pack()
-down.pack()
-temp.pack(side=RIGHT)
+close.grid(column=4, row=5)
+up.grid(column=0, row=5)
+down.grid(column=0, row=6)
+temp.grid(column=1, row=5)
 header.pack(side=TOP)
 temp_control.pack(side=BOTTOM)
 
