@@ -498,10 +498,10 @@ def screen_print():
 ############################################
 ## Setup Display
 ############################################
-display = lcddriver.lcd()
-display.lcd_clear()
-    
-print("Current Set Temp is: ", set_Temp)
+##display = lcddriver.lcd()
+##display.lcd_clear()
+##    
+##print("Current Set Temp is: ", set_Temp)
 
 
 
@@ -562,23 +562,23 @@ try:
         string_Time = now.strftime('%b-%d-%I:%M:%S')
         
         ## Update Display
-        if (relay_State == 1):
-            heat_State = "    ON"
-        elif (relay_State == 0):
-            heat_State = "   OFF"
-        try:
-            if (hold == 1):
-                show2 = str("Held At:  " + str(hold_Temp) + " " + str(heat_State))
-            elif (hold == 0):
-                show2 = str("Set: " + str(set_Temp) + " " + str(heat_State))
-            show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
-            display.lcd_display_string(show1, 1)
-            display.lcd_display_string(show2, 2)
-            
-        except:
-            print("Display error")
-            display = lcddriver.lcd()
-            display.lcd_clear()
+##        if (relay_State == 1):
+##            heat_State = "    ON"
+##        elif (relay_State == 0):
+##            heat_State = "   OFF"
+##        try:
+##            if (hold == 1):
+##                show2 = str("Held At:  " + str(hold_Temp) + " " + str(heat_State))
+##            elif (hold == 0):
+##                show2 = str("Set: " + str(set_Temp) + " " + str(heat_State))
+##            show1 = str("T: " + str(new_Temperature) + " H: " + str(new_Humidity))
+##            display.lcd_display_string(show1, 1)
+##            display.lcd_display_string(show2, 2)
+##            
+##        except:
+##            print("Display error")
+##            display = lcddriver.lcd()
+##            display.lcd_clear()
 
         time_now = int(time.time()) ## Keep current time updated for use in counter and motion sensor
         
