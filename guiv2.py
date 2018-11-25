@@ -1,20 +1,22 @@
 from tkinter import *
 #import pymysql.cursors
-import sqlite3 as lite
+import MySQLdb
 import time
 from datetime import datetime
 
 global DB_Temp  #Temp var from update_from_DB used to display current temp
-global DB_set_temp #Current Set Temp from update_from_DB
+global DB_set_Temp #Current Set Temp from update_from_DB
 global away_hold
 global debug
+global zone
 
 away_hold = 60
 GUI = 1
 set_Temp = 0 #set var before updated from DB
 DB_Temp = 0 #set var before updated from DB
-DB_set_temp = 0 #set var before updated from DB
+DB_set_Temp = 0 #set var before updated from DB
 debug = 0
+zone = 'living'
 
 ## Setup Main Window
 
@@ -28,22 +30,27 @@ root.attributes("-fullscreen", True)
 
 def temp_up():
     new_Temp = 60
-    global set_Temp
-    new_Temp = set_Temp + 1
+    global DB_set_Temp
+    global zone
+    new_Temp = DB_set_Temp + 1
     print("Temp UP to ", (new_Temp))
-    conn = lite.connect('thermostat.db')
-    c = conn.cursor()
-    c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (new_Temp,))
+    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+    c = conn.cursor (MySQLdb.cursors.DictCursor)
+    sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
+    val = (new_Temp, zone)
+    c.execute(sql, val)
     conn.commit()
 
 def temp_down():
     new_Temp = 60
-    global set_Temp
-    new_Temp = set_Temp - 1
+    global DB_set_Temp
+    new_Temp = DB_set_Temp - 1
     print("Temp UP to ", (new_Temp))
-    conn = lite.connect('thermostat.db')
-    c = conn.cursor()
-    c.execute("UPDATE settings set settemp = ? WHERE zone = 'living'", (new_Temp,))
+    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+    c = conn.cursor (MySQLdb.cursors.DictCursor)
+    sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
+    val = (new_Temp, zone)
+    c.execute(sql, val)
     conn.commit()
 
 def debug_msg(message):
@@ -73,15 +80,17 @@ def debug_msg(message):
             debug_button_msg.set(string_Time + " - " + str(message))
             
 def away(): #Hold temp while out of house. eleminate dog setting motion off
-    conn = lite.connect('thermostat.db')
-    c = conn.cursor()
+    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+    c = conn.cursor (MySQLdb.cursors.DictCursor)
     global away_hold
-    
+    global zone    
     global hold
     if (hold == 0):
         try:
-            c.execute("UPDATE settings SET holdtemp = ? WHERE zone = 'living'", (away_hold,))
-            c.execute("UPDATE settings SET hold = 1 WHERE zone = 'living'")
+            hold = 1
+            sql = ("UPDATE settings SET hold = %s WHERE zone = %s")
+            val = (hold, zone)
+            c.execute(sql, val)
             conn.commit()
         except:
             debug_msg("Error Updating DB")
@@ -102,8 +111,8 @@ def keypad(field):
     global hold
     global keyp
     # Setup DB Connection
-    conn = lite.connect('thermostat.db')
-    c = conn.cursor()
+    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+    c = conn.cursor (MySQLdb.cursors.DictCursor)
     
     def code(value): #Run after each keypress
         global keyp
@@ -120,16 +129,22 @@ def keypad(field):
             if (int(pin) > 49 and int(pin) < 76):
                 print("Temp OK")
                 try:
-                    c.execute("UPDATE settings SET holdtemp = ? WHERE zone = 'living'", (pin,))
-                    c.execute("UPDATE settings SET hold = 1 WHERE zone = 'living'")
+                    sql = """UPDATE settings SET holdtemp = %s WHERE zone = %s"""
+                    val = (pin, zone)
+                    c.execute(sql, val)
+                    conn.commit()
+                    hold = 1
+                    sql = """UPDATE settings SET hold = %s WHERE zone = %s"""
+                    val = (hold, zone)
+                    c.execute(sql, val)
                     conn.commit()
                     print("Hold Set")
                 except:
-                    debug_msg("error updating hold")
+                    debug_msg("error updating hold to DB")
                 keyp.quit()
                 keyp.destroy()
             else:
-                debug_msg("Temp Error")
+                debug_msg("Temp Error outside range")
                 keyp.destroy()
                 pin = ''
                 # clear
@@ -170,12 +185,15 @@ def keypad(field):
 
         keyp.mainloop()
     else: # If hold is already set...Clear Hold
-        c.execute("UPDATE settings SET hold = 0 WHERE zone = 'living'")
+        hold = 0
+        sql = ("""UPDATE settings SET hold = %s WHERE zone = %s""")
+        val = (hold, zone)
+        c.execute(sql, val)
         conn.commit()
         
 def update_from_DB():
     ## Keep Data Current from DB
-    global set_Temp
+    global DB_set_Temp
     global backup_Temp
     global end_Thread
     global hold_Temp
@@ -187,20 +205,23 @@ def update_from_DB():
     global DB_humidity
     
     try:
-        conn = lite.connect('thermostat.db')
-        c = conn.cursor()
+        conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+        c = conn.cursor (MySQLdb.cursors.DictCursor)
         c.execute("SELECT settemp, backuptemp, hold, holdtemp, lastmotion, motion, temp , relay , humidity FROM settings WHERE zone = 'living'")
         row = c.fetchone()
         # Store Data from DB
-        set_Temp = float(row[0])
-        backup_Temp = float(row[1])
-        hold_Temp = int(row[3])
-        last_motion = int(row[4])
-        motion = int(row[5])
-        hold = int(row[2])
-        DB_Temp = float(row[6])
-        DB_relay = float(row[7])
-        DB_humidity = float(row[8])
+        DB_set_Temp = float(row['settemp'])
+        print(DB_set_Temp)
+        backup_Temp = float(row['backuptemp'])
+        hold_Temp = int(row['holdtemp'])
+        print(hold_Temp)
+        last_motion = int(row['lastmotion'])
+        motion = int(row['motion'])
+        hold = int(row['hold'])
+        print(hold)
+        DB_Temp = float(row['temp'])
+        DB_relay = float(row['relay'])
+        DB_humidity = float(row['humidity'])
         #print(hold)
         
     except:
@@ -208,7 +229,7 @@ def update_from_DB():
         
         time.sleep(1)
     
-    current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+" F - "+str("Set Temp is: ")+str(set_Temp)+chr(176)+" F ")
+    current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+" F - "+str("Set Temp is: ")+str(DB_set_Temp)+chr(176)+" F ")
     title_var.set ("Raspberry Pi Home Thermostat - Zone - "+"Living")    ## Change to var when SQL above uses var for zone
     DB_humidity = str(DB_humidity)
     humidity_status.set (str(DB_humidity) + " %")    
@@ -281,7 +302,7 @@ current_temp = StringVar()
 set_temp = StringVar()
 
 temp_label = Label(top_frame, textvariable=current_temp, font=("Helvetica", 16), bg = "black", fg="white")
-current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+str("Set Temp is: ")+str(DB_set_temp))
+current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+str("Set Temp is: ")+str(DB_set_Temp))
 temp_label.grid(column=1, row=1)
 
 ## Temp Control Buttons
