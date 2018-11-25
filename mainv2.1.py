@@ -1,9 +1,9 @@
 ## V 2.1
 ## Goal - Clean up code.
 ## Remove excess vars
-#### move sql updates to function ( pass field, value, zone)
+#### DONE - ve sql updates to function ( pass field, value, zone)
 ## Make threads independent, no globals as possible
-#### replace prints with log
+#### Done - replace prints with log
 
 
 import RPi.GPIO as GPIO
@@ -56,13 +56,14 @@ class Update_Data(threading.Thread):
 
     def run(self):
         global end_Thread
+        global startup
         zone = self.zone
 
         new_Temperature = "Calc." #sets initial value while being calculated.
         new_Humidity = 0
         old_Temperature = 0
         instance = dht.DHT11(pin=19)
-        
+        startup = 1        
         ## Loop to set initial data for temp Average. Time of loop is based on avg_Time
         i = 0
         avg_temp_Data = []
@@ -84,12 +85,14 @@ class Update_Data(threading.Thread):
         ## Calculate average Temp/Humidity          
         new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data))) # Do initial Average
         new_Humidity = float("{0:.2f}".format(numpy.mean(avg_humidity_Data)))
-
+        sql_update('temp', new_Temperature, zone, 'Update Temp Initial')
+        sql_update('humidity', new_Humidity, zone, 'Update Humidity Initial')
         os.system('clear')
         log("Done Getting Temp")
-        
+        time.sleep(1)
         ### Start Forever loop to keep temp and humidity updated.
         try:
+            startup = 0
             while (end_Thread == 0):
                 result = instance.read()
                 if result.is_valid():
@@ -127,7 +130,8 @@ class DB_Modify(threading.Thread):
         self.zone = zone
     def run(self):
         global end_Thread
-        global run_Temp        
+        global run_Temp
+        global startup
         temp_Held = 0
         run_Temp = 60
         motion_Hold = 0
@@ -189,7 +193,7 @@ class DB_Modify(threading.Thread):
                         send_Notification("Living Room", ("No Motion, Temp droped to: " + str(run_Temp)))
                         
             try:
-                if (new_Temperature != "Calc."):
+                if (startup == 0):
                     if (((float(temp) + .5) < float(run_Temp)) and (relay == 0)):
                         try:
                             relay_On(relaypin, zone)
@@ -277,7 +281,7 @@ class Detect_Motion(threading.Thread):
                         motion = sum(avg_Motion_data)
                         time_now = int(time.time())
                         time_left = ((last_motion + no_motion_delay) - time_now)
-                        if (time_now >= (last_motion + no_motion_delay)) and (DB_motion == 1):
+                        if (time_now >= (last_motion + no_motion_delay)):
                             sql_update('motion', DB_motion, zone, 'No Motion - Update motion')
                             
                         time.sleep(.2)
