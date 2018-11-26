@@ -156,36 +156,36 @@ class DB_Modify(threading.Thread):
             except:
                 log("Error pulling data - DB Modify")
             
-            if (hold == 1):
+            if (hold == 1): ## If hold is ON
                 
-                if (temp_Held == 0):
-                    temp_Held = 1
-                    run_Temp = hold_Temp
+                if (temp_Held == 0): ## If hold was not on previous
+                    temp_Held = 1 ## Set value so hold only triggers once
+                    run_Temp = hold_Temp ## Set temp
                     log("Temp Held - Temp set to: " + str(run_Temp))
                     send_Notification("Living Room", ("Hold - Temp set to: " + str(run_Temp)))
-                if (temp_Held == 1): ## Update hold temp while it is being held.
+                if (temp_Held == 1): ## If hold temp changes while on hold - maybe from gui
                     run_Temp = hold_Temp
                     
-            if (hold == 0):
+            if (hold == 0): ## If not holding
                 
                 if (temp_Held == 1): ## If temp was held
                     temp_Held = 0
-                    if (motion == 1):
+                    if (motion == 1): ## If was holding and Motion
                         run_Temp = set_Temp
                         log(("Hold Removed - Returning Temp to " + str(run_Temp) + " Current Temp: " + str(temp)))
                         send_Notification("Living Room", ("Hold Removed - Temp set to: " + str(run_Temp)+ " Current Temp: " + str(temp)))
-                    if (motion == 0):
+                    if (motion == 0): ## If was holding and no motion
                         run_Temp = backup_Temp
                         motion_Hold = 1
                         log(("Hold Removed - No Motion - Set to: " + str(run_Temp)+ " Current Temp: " + str(temp)))
                         send_Notification("Living Room", ("Hold Removed - No Motion - Temp set to: " + str(run_Temp)+ " Current Temp: " + str(temp)))
-                if (motion == 1):                    
+                if (motion == 1):   ## Not Holding and IS Motion      
                     run_Temp = set_Temp
-                    if (motion_Hold == 1):
+                    if (motion_Hold == 1): ## Motion notifications only trigger once
                         motion_Hold = 0
                         log("Motion Detected - Returning temp to " + str(run_Temp))
                         send_Notification("Living Room", ("Motion Detected, Temp returned to: " + str(run_Temp)))
-                elif (motion == 0):
+                elif (motion == 0): ## Not holding and No Motion
                     run_Temp = backup_Temp
                     if (motion_Hold == 0):
                         motion_Hold = 1
@@ -193,8 +193,10 @@ class DB_Modify(threading.Thread):
                         send_Notification("Living Room", ("No Motion, Temp droped to: " + str(run_Temp)))
                         
             try:
-                if (startup == 0):
-                    if (((float(temp) + .5) < float(run_Temp)) and (relay == 0)):
+                if (startup == 0): ## Only do Logic after initial temp average
+                    ## Gives a .5 degree flux to avoid triggering heat on and off repeaditly if temp is close
+                    ## Also only triggers if relay is off already to avoid constantly triggering
+                    if (((float(temp) + .5) < float(run_Temp)) and (relay == 0)): 
                         try:
                             relay_On(relaypin, zone)
                             log("Turned on Heat - Temp: " + str(temp))
@@ -209,7 +211,7 @@ class DB_Modify(threading.Thread):
             except:
                 log("Error in : DB Modify - Execution")
             
-            time.sleep(.2)
+            time.sleep(.1)
 class Detect_Motion(threading.Thread):
     def __init__(self, pin, delay, zone):
         threading.Thread.__init__(self)
@@ -261,10 +263,11 @@ class Detect_Motion(threading.Thread):
                 if ((motion > 5)):
                     #log("motion")
                     DB_motion = 1
+                    
                     time_now = int(time.time())
                     sql_update('lastmotion', time_now, zone, 'Motion Detected - Update lastmotion')
                     sql_update('motion', DB_motion, zone, 'Motion Detected - Update motion')
-                        
+                      
                     motion_detect = 1
                     
                 ### NO Motion
@@ -275,15 +278,17 @@ class Detect_Motion(threading.Thread):
                             i = 1
                         elif (pir.is_active == False):
                             i = 0
-                        
+                        DB_motion = 0
+                        last_motion = sql_fetch('lastmotion', zone)
                         avg_Motion_data.append(i)
                         del avg_Motion_data[0]
                         motion = sum(avg_Motion_data)
                         time_now = int(time.time())
                         time_left = ((last_motion + no_motion_delay) - time_now)
+                                   
                         if (time_now >= (last_motion + no_motion_delay)):
                             sql_update('motion', DB_motion, zone, 'No Motion - Update motion')
-                            
+                            print("No Motion")    
                         time.sleep(.2)
                     
                 
