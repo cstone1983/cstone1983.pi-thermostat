@@ -8,13 +8,12 @@
 
 import RPi.GPIO as GPIO
 from gpiozero import MotionSensor
-import time
+import os, subprocess, time
 import threading
 from datetime import datetime
 import sys
 import dht
 import numpy
-import os
 import http.client, urllib
 import MySQLdb
 
@@ -42,7 +41,7 @@ avg_Delay = 1 # Delay between temp readings
 hold_Temp = 0 #used to hold temp from user input
 end_Thread = 0 # Helps to end active threads
 no_motion_delay = 900 ## Delay before motion timeout - 900 = 15min
-
+screen_delay = 20 ## Delay off for the screen
 #################
 #Thread Classes
 #################
@@ -213,11 +212,12 @@ class DB_Modify(threading.Thread):
             
             time.sleep(.1)
 class Detect_Motion(threading.Thread):
-    def __init__(self, pin, delay, zone):
+    def __init__(self, pin, delay, screen_delay, zone):
         threading.Thread.__init__(self)
         self.pin = pin
         self.delay = delay
         self.zone = zone
+        self.screen_delay = screen_delay
     def run(self):
         global end_Thread
         zone = self.zone
@@ -228,6 +228,7 @@ class Detect_Motion(threading.Thread):
         #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         pir=MotionSensor(self.pin)        
         DB_motion = 1
+        no_screen_delay = self.screen_delay
         no_motion_delay = self.delay # 15 Min
         temp_overriden = 0 #used so set_temp only gets changed once
         x = 0
@@ -266,10 +267,10 @@ class Detect_Motion(threading.Thread):
                     
                     time_now = int(time.time())
                     sql_update('lastmotion', time_now, zone, 'Motion Detected - Update lastmotion')
-                    sql_update('motion', DB_motion, zone, 'Motion Detected - Update motion')
-                      
+                    sql_update('motion', DB_motion, zone, 'Motion Detected - Update motion') 
                     motion_detect = 1
-                    
+                    ## Turn Display On when motion is detected.                    
+                    subprocess.call('xset dpms force on', shell=True)
                 ### NO Motion
                 elif ((motion <= 5)):
                     #log("No Moion")                    
@@ -285,10 +286,10 @@ class Detect_Motion(threading.Thread):
                         motion = sum(avg_Motion_data)
                         time_now = int(time.time())
                         time_left = ((last_motion + no_motion_delay) - time_now)
-                                   
+                        if (time_now >= (last_motion + no_screen_delay)): ## Turn display off when no motion
+                            subprocess.call('xset dpms force off', shell=True)
                         if (time_now >= (last_motion + no_motion_delay)):
                             sql_update('motion', DB_motion, zone, 'No Motion - Update motion')
-                            print("No Motion")    
                         time.sleep(.2)
                     
                 
@@ -476,7 +477,7 @@ for x in zones:
 #################################
 for x in zones:
     try:
-        motion = Detect_Motion(pirpin, no_motion_delay, x)
+        motion = Detect_Motion(pirpin, no_motion_delay, screen_delay, x)
         motion.start()
     except:
         log("Error Starting Motion Detection")
