@@ -32,6 +32,8 @@ string_Time = now.strftime('%b-%d-%I:%M:%S')
 new_Temperature = 0
 new_Humidity = 0
 relay_State = 0 # State of relay, so relay is not constantly being triggered on or off
+active_timeout = 60 #Time between activity to determin if a zone is disconnected ( need to account for wifi lag)
+
 
 #Pin Numbers, Temp Sensor set in dht.py, lcd pins set in lcddriver
 pirpin = 20 # Pin connected to PIR
@@ -111,7 +113,7 @@ class Update_Data(threading.Thread):
                     avg_humidity_Data.append(current_Humidity)
                     del avg_humidity_Data[0]
                     new_Humidity = float("{0:2f}".format(numpy.mean(avg_humidity_Data)))
-                    new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
+                    new_Humidity = float("{0:2f}".format(numpy.mean(new_Humidity)))
                     ## Update Database
                     sql_update('humidity', new_Humidity, zone, 'Update Humidity')
                             
@@ -212,10 +214,10 @@ class DB_Modify(threading.Thread):
             
             time.sleep(.1)
 class Detect_Motion(threading.Thread):
-    def __init__(self, pin, delay, screen_delay, zone):
+    def __init__(self, pin, motion_delay, screen_delay, zone):
         threading.Thread.__init__(self)
         self.pin = pin
-        self.delay = delay
+        self.motion_delay = motion_delay
         self.zone = zone
         self.screen_delay = screen_delay
     def run(self):
@@ -229,7 +231,7 @@ class Detect_Motion(threading.Thread):
         pir=MotionSensor(self.pin)        
         DB_motion = 1
         no_screen_delay = self.screen_delay
-        no_motion_delay = self.delay # 15 Min
+        no_motion_delay = self.motion_delay # 15 Min
         temp_overriden = 0 #used so set_temp only gets changed once
         x = 0
         avg_Motion_data = []
@@ -352,7 +354,7 @@ def relay_On(pin, zone):
     conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
     c = conn.cursor (MySQLdb.cursors.DictCursor)
     try:
-        GPIO.output(pin, GPIO.HIGH)
+        #GPIO.output(pin, GPIO.HIGH)
         relay_State = 1
     except:
         log('Error turning ON relay')
@@ -368,7 +370,7 @@ def relay_Off(pin, zone):
     c = conn.cursor (MySQLdb.cursors.DictCursor)
     relay_State = 0
     try:
-        GPIO.output(pin, GPIO.LOW)
+        #GPIO.output(pin, GPIO.LOW)
         
         sql_update('relay', relay_State, zone, 'relay_Off')
     except:
@@ -384,7 +386,7 @@ def send_Notification(title, body):
             "token": "awmq2qh4qoijvztozwuvte5qdbikhm",
             "user": "u9yffbyi7ppxhcw79xwfwg5afhszk2",
             "message": body,
-        }), { "Content-type": "application/x-www-form-urlencoded" })
+    }), { "Content-type": "application/x-www-form-urlencoded" })
     conn.getresponse()
 def log(message):
     now = datetime.now()
@@ -458,7 +460,7 @@ for x in zones:
         DB.start()
     except:
         log("Error Starting DB Update")
-
+    
     
 ###########
 # Start User Input
@@ -485,10 +487,56 @@ for x in zones:
 ##########################
 ## Main Loop
 ##########################
-
+kitchen_notify = 0
+control_notify = 0
+kitchen_update = 0
+control_update = 0
+upstairs_update = 0
+upstairs_notify = 0
 try:
     while (end_Thread == 0):
-        time.sleep(1)        
+        time.sleep(1)
+        now = float(time.time())
+        sql_update("last_updated", now, "living", "Update for Activity")
+        kitchen_activity = float(sql_fetch("last_updated", "kitchen"))
+        control_activity = float(sql_fetch("last_updated", "control"))
+        upstairs_activity = float(sql_fetch("last_updated", "upstairs"))
+
+        ##Kitchen Zone Activity Monitor
+        if (now > (kitchen_activity + active_timeout)): #No Activity
+            if (kitchen_notify == 0): #Not Notified
+                send_Notification("Living Room", "Kitchen Zone Offline")
+                kitchen_notify = 1
+                sql_update("active", kitchen_notify, "kitchen", "Kitchen Activity")
+                
+        if(now < (kitchen_activity + active_timeout)): # Activity
+            if(kitchen_notify == 1):
+                send_Notification("Living Room", "Kitchen Zone ReConnected")
+                kitchen_notify = 0
+                sql_update("active", kitchen_notify, "kitchen", "Kitchen Activity")
+                
+        ## Control Activity Monitor
+        if (now > (control_activity + active_timeout)): #No Activity
+            if (control_notify == 0): #Not Notified
+                send_Notification("Living Room", "Relay Control Offline") 
+                control_notify = 1
+                sql_update("active", control_notify, "control", "Control Activity")
+        if(now < (control_activity + active_timeout)): # Activity
+            if(control_notify == 1):
+                send_Notification("Living Room", "Relay Control ReConnected")
+                control_notify = 0
+                sql_update("active", control_notify, "control", "Control Activity")
+        ## Upstairs Activity Monitor
+        if (now > (upstairs_activity + active_timeout)): #No Activity
+            if (upstairs_notify == 0): #Not Notified
+                send_Notification("Living Room", "Upstairs Zone Offline") 
+                upstairs_notify = 1
+                sql_update("active", upstairs_notify, "upstairs", "Upstairs Activity")
+        if(now < (upstairs_activity + active_timeout)): # Activity
+            if(upstairs_notify == 1):
+                send_Notification("Living Room", "Upstairs ReConnected")
+                upstairs_notify = 0
+                sql_update("active", upstairs_notify, "upstairs", "Upstairs Activity")
 
 except (KeyboardInterrupt, SystemExit):
     send_Notification("Living Room", "Thermostat App Closing")
