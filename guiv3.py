@@ -153,14 +153,14 @@ def Info_Update():
     elif z3_relay == 0:
         upstairs_label.configure(fg="white")
         
-    if(z2_active == 1):
+    if(z2_active == 0):
         kitchen_label.configure(fg="red")
-    if(z3_active == 1):
+    if(z3_active == 0):
         upstairs_label.configure(fg="red")
-    if(z4_active == 1):
+    if(z4_active == 0):
         control_label.configure(fg="red")
         control_temp.set (str("Control\nOffline"))
-    if(z4_active == 0):
+    if(z4_active == 1):
         control_label.configure(fg="white")
         control_temp.set (str("Control\nOnline"))
     if(z4_hold == 1):
@@ -260,9 +260,10 @@ def away(): #Hold temp while out of house. eleminate dog setting motion off
     home_away = sql_fetch("hold", "Control")
     if (home_away == 0):
         try:
-            sql_update("hold", 1, "Living", "Setting Home AWAY")
-            sql_update("settemp", 58, "Kitchen", "Setting Home AWAY")
+            sql_update("holdtemp", 58, "Living", "Setting Home AWAY")
             sql_update("settemp", 58, "Upstairs", "Setting Home AWAY")
+            sql_update("settemp", 58, "Kitchen", "Setting Home AWAY")
+            sql_update("hold", 1, "Living", "Setting Home AWAY")
             sql_update("hold", 1, "Control", "Setting Home AWAY")
         except:
             print("Error Updating DB")
@@ -270,6 +271,7 @@ def away(): #Hold temp while out of house. eleminate dog setting motion off
         try:
             sql_update("hold", 0, "Living", "Setting Home AWAY")
             sql_update("settemp", 62, "Kitchen", "Setting Home AWAY")
+            sql_update("settemp", 58, "Upstairs", "Setting Home AWAY")
             sql_update("hold", 0, "Control", "Setting Home AWAY")
         except:
             print("Error Updating DB")
@@ -528,7 +530,7 @@ upstairs_button.grid(column=3, row=0)
 
 kids_button_txt = StringVar()
 kids_button_txt.set(str("Kids Bedtime"))
-kids_button = Button(Footer, image=pixel, font="Verdana 17", highlightthickness=0, borderwidth=0, textvariable=kids_button_txt, command=end, bg="black", fg="white", activebackground="black", activeforeground="white",compound="right")
+kids_button = Button(Footer, image=pixel, font="Verdana 17", highlightthickness=0, borderwidth=0, textvariable=kids_button_txt, command=kids_bed, bg="black", fg="white", activebackground="black", activeforeground="white",compound="right")
 kids_button.config(height=61, width=140)
 kids_button.grid(column=4, row=0)
 

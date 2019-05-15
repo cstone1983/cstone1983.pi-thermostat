@@ -29,30 +29,33 @@ root.attributes("-fullscreen", True)
 ## GUI Functions ##
 
 def temp_up():
-    new_Temp = 60
     global DB_set_Temp
     global zone
     new_Temp = DB_set_Temp + 1
     print("Temp UP to ", (new_Temp))
-    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
-    c = conn.cursor (MySQLdb.cursors.DictCursor)
-    sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
-    val = (new_Temp, zone)
-    c.execute(sql, val)
-    conn.commit()
-
+    try:
+        conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+        c = conn.cursor (MySQLdb.cursors.DictCursor)
+        sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
+        val = (new_Temp, zone)
+        c.execute(sql, val)
+        conn.commit()
+    except:
+        debug_msg("Error Changing Temp")
 def temp_down():
-    new_Temp = 60
     global DB_set_Temp
+    global zone
     new_Temp = DB_set_Temp - 1
     print("Temp UP to ", (new_Temp))
-    conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
-    c = conn.cursor (MySQLdb.cursors.DictCursor)
-    sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
-    val = (new_Temp, zone)
-    c.execute(sql, val)
-    conn.commit()
-
+    try:
+        conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
+        c = conn.cursor (MySQLdb.cursors.DictCursor)
+        sql = ("UPDATE settings set settemp = %s WHERE zone = %s""")
+        val = (new_Temp, zone)
+        c.execute(sql, val)
+        conn.commit()
+    except:
+        debug_msg("Error Changing Temp")
 def debug_msg(message):
     global debug
     
@@ -231,6 +234,7 @@ def update_from_DB():
     
     current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+" F - "+str("Set Temp is: ")+str(DB_set_Temp)+chr(176)+" F ")
     title_var.set ("Raspberry Pi Home Thermostat - Zone - "+"Living")    ## Change to var when SQL above uses var for zone
+    #time_var.set ("Raspberry Pi Home Thermostat - Zone - "+"Living")    ## Change to var when SQL above uses var for zone
     DB_humidity = str(DB_humidity)
     humidity_status.set (str(DB_humidity) + " %")    
     if (hold == 1):
@@ -289,13 +293,15 @@ ctr_right.grid(row=0, column=2, sticky="ns")
 zone = StringVar(top_frame)
 zone="Living"
 option = OptionMenu(top_frame, zone, "one", "two", "three", "four")
-option.grid(row=1, column=0)
+option.grid(row=2, column=0)
 
 ## Title
 title_var = StringVar()
-
+time_var = StringVar()
 title_label = Label(top_frame, textvariable=title_var, font=("Helvetica", 16), bg = "black", fg="white")
 title_label.grid(row=0, column=0, columnspan=4)
+time_label = Label(top_frame, textvariable=time_var, font=("Helvetica", 16), bg = "black", fg="white")
+title_label.grid(row=1, column=0, columnspan=4)
 ##Current Temp
 
 current_temp = StringVar()
@@ -303,7 +309,7 @@ set_temp = StringVar()
 
 temp_label = Label(top_frame, textvariable=current_temp, font=("Helvetica", 16), bg = "black", fg="white")
 current_temp.set (str("Current Temp is: ")+str(DB_Temp)+" "+chr(176)+str("Set Temp is: ")+str(DB_set_Temp))
-temp_label.grid(column=1, row=1)
+temp_label.grid(column=1, row=2)
 
 ## Temp Control Buttons
 
@@ -317,7 +323,7 @@ up.pack(side=BOTTOM)
 
 close = Button(top_frame, text="Exit", command=end, height=2, width=10, bg="black", fg="white", activebackground="black", activeforeground="white")
 
-close.grid(row=1, column=3, sticky=E)
+close.grid(row=2, column=3, sticky=E)
 
 ## Hold Button
 

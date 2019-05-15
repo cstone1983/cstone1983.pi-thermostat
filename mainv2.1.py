@@ -138,7 +138,7 @@ class DB_Modify(threading.Thread):
         motion_Hold = 0
         relaypin = 23 # Pin connected to relay
         zone = self.zone
-        sql_update('relay', '0', zone, "Initial Setup - Clear Relay in DB")
+        sql_update('relay', '0', zone, "Initial Setup - Clear Relay in DB") ##Old, control handles relay var
 
         while (end_Thread == 0):
             now = datetime.now()
@@ -337,7 +337,6 @@ class Menu_System(threading.Thread):
                 sql_update('backuptemp', do_this, zone, "Menu - Update backuptemp")
                 
             elif (action == "exit"):
-                send_Notification("Living Room", "Thermostat App Closing")
                 end_Thread = 1
         
             action = 0
@@ -487,6 +486,10 @@ for x in zones:
 ##########################
 ## Main Loop
 ##########################
+## System Startup Notification
+send_Notification("Living Room", "Living - System Started")
+
+
 kitchen_notify = 0
 control_notify = 0
 kitchen_update = 0
@@ -504,42 +507,47 @@ try:
 
         ##Kitchen Zone Activity Monitor
         if (now > (kitchen_activity + active_timeout)): #No Activity
+            sql_update("active", '0', "kitchen", "Kitchen Activity")
             if (kitchen_notify == 0): #Not Notified
-                send_Notification("Living Room", "Kitchen Zone Offline")
+                send_Notification("Living Room", "System - Kitchen Zone Offline")
                 kitchen_notify = 1
-                sql_update("active", kitchen_notify, "kitchen", "Kitchen Activity")
                 
         if(now < (kitchen_activity + active_timeout)): # Activity
+            sql_update("active", '1', "kitchen", "Kitchen Activity")
             if(kitchen_notify == 1):
-                send_Notification("Living Room", "Kitchen Zone ReConnected")
+                send_Notification("Living Room", "System - Kitchen Zone ReConnected")
                 kitchen_notify = 0
-                sql_update("active", kitchen_notify, "kitchen", "Kitchen Activity")
+                
                 
         ## Control Activity Monitor
         if (now > (control_activity + active_timeout)): #No Activity
+            sql_update("active", '0', "control", "Control Activity")
             if (control_notify == 0): #Not Notified
-                send_Notification("Living Room", "Relay Control Offline") 
+                send_Notification("Living Room", "System - Relay Control Offline") 
                 control_notify = 1
-                sql_update("active", control_notify, "control", "Control Activity")
+                
         if(now < (control_activity + active_timeout)): # Activity
+            sql_update("active", '1', "control", "Control Activity")
             if(control_notify == 1):
-                send_Notification("Living Room", "Relay Control ReConnected")
+                send_Notification("Living Room", "System - Relay Control ReConnected")
                 control_notify = 0
-                sql_update("active", control_notify, "control", "Control Activity")
+
         ## Upstairs Activity Monitor
         if (now > (upstairs_activity + active_timeout)): #No Activity
+            sql_update("active", '0', "upstairs", "Upstairs Activity")
             if (upstairs_notify == 0): #Not Notified
-                send_Notification("Living Room", "Upstairs Zone Offline") 
+                send_Notification("Living Room", "System - Upstairs Zone Offline") 
                 upstairs_notify = 1
-                sql_update("active", upstairs_notify, "upstairs", "Upstairs Activity")
+                
         if(now < (upstairs_activity + active_timeout)): # Activity
+            sql_update("active", '1', "upstairs", "Upstairs Activity")
             if(upstairs_notify == 1):
-                send_Notification("Living Room", "Upstairs ReConnected")
+                send_Notification("Living Room", "System - Upstairs ReConnected")
                 upstairs_notify = 0
-                sql_update("active", upstairs_notify, "upstairs", "Upstairs Activity")
+                
 
 except (KeyboardInterrupt, SystemExit):
-    send_Notification("Living Room", "Thermostat App Closing")
+    send_Notification("Living Room", "Living - App Closing")
     GPIO.setmode(GPIO.BCM)
     GPIO.cleanup()
 log("Exiting...")
