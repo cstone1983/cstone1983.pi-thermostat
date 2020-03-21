@@ -1,6 +1,10 @@
-## V4
+## V 2.1
 ## Goal - Clean up code.
-## Add try/except/else to all areas
+## Remove excess vars
+#### DONE - ve sql updates to function ( pass field, value, zone)
+## Make threads independent, no globals as possible
+#### Done - replace prints with log
+
 
 import RPi.GPIO as GPIO
 from gpiozero import MotionSensor
@@ -12,10 +16,10 @@ import dht
 import numpy
 import http.client, urllib
 import MySQLdb
-import paho.mqtt.client as mqtt
 
 #Globals
-global end_Thread ## Used to end all Threads on exit
+global relaypin
+global end_Thread
 global zone
 
 ## Zone Setup
@@ -23,22 +27,26 @@ global zone
 zone = 'living'
 
 ## Setup Vars
-
-pirpin = 20 # Pin connected to PIR
-end_Thread = 0 # Helps to end active threads
-
-## Config Vars
-
+now = datetime.now()
+string_Time = now.strftime('%b-%d-%I:%M:%S')
+new_Temperature = 0
+new_Humidity = 0
+relay_State = 0 # State of relay, so relay is not constantly being triggered on or off
 active_timeout = 60 #Time between activity to determin if a zone is disconnected ( need to account for wifi lag)
-avg_Time = 10 #Number of Temp Reads in array average
-avg_Delay = 3 # Delay between temp readings
+
+
+#Pin Numbers, Temp Sensor set in dht.py, lcd pins set in lcddriver
+pirpin = 20 # Pin connected to PIR
+
+avg_Time = 30 #Number of Temp Reads in array average
+avg_Delay = 1 # Delay between temp readings
+hold_Temp = 0 #used to hold temp from user input
+end_Thread = 0 # Helps to end active threads
 no_motion_delay = 900 ## Delay before motion timeout - 900 = 15min
-screen_delay = 60 ## Delay off for the screen
-
-
+screen_delay = 20 ## Delay off for the screen
 #################
 #Thread Classes
-################
+#################
 
 class Update_Data(threading.Thread):
     def __init__(self, delay, avg_Time, zone):
@@ -46,11 +54,7 @@ class Update_Data(threading.Thread):
         self.delay = delay
         self.avg_Time = avg_Time
         self.zone = zone
-        self.mq = mqtt.Client()
-        self.mq.connect("192.168.68.112")
-        self.mq.loop_start()
 
-  
     def run(self):
         global end_Thread
         global startup
@@ -101,9 +105,7 @@ class Update_Data(threading.Thread):
                         new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
                         ## Update Database
                         sql_update('temp', new_Temperature, zone, 'Update Temp')
-                        ## Update MQTT
-                        self.mq.publish("/tstat/living/temp", new_Temperature)
-                        
+                       
                 ## Get current Humidity
 
                 current_Humidity = result.humidity
@@ -191,13 +193,13 @@ class DB_Modify(threading.Thread):
                     if (motion_Hold == 1): ## Motion notifications only trigger once
                         motion_Hold = 0
                         log("Motion Detected - Returning temp to " + str(run_Temp))
-                        ##send_Notification("Living Room", ("Motion Detected, Temp returned to: " + str(run_Temp)))
+                        send_Notification("Living Room", ("Motion Detected, Temp returned to: " + str(run_Temp)))
                 elif (motion == 0): ## Not holding and No Motion
                     run_Temp = backup_Temp
                     if (motion_Hold == 0):
                         motion_Hold = 1
                         log("Motion Held backup - temp is: " + str(backup_Temp))
-                        ##send_Notification("Living Room", ("No Motion, Temp droped to: " + str(run_Temp)))
+                        send_Notification("Living Room", ("No Motion, Temp droped to: " + str(run_Temp)))
                         
             try:
                 if (startup == 0): ## Only do Logic after initial temp average
@@ -205,13 +207,13 @@ class DB_Modify(threading.Thread):
                     ## Also only triggers if relay is off already to avoid constantly triggering
                     if (((float(temp) + .5) < float(run_Temp)) and (relay == 0)): 
                         try:
-                            relay_On(zone)
+                            relay_On(relaypin, zone)
                             log("Turned on Heat - Temp: " + str(temp))
                         except:
                             log("Error in : DB Modify - Starting Relay")
                     elif ((float(temp) > float(run_Temp)) and (relay == 1)):
                         try:
-                            relay_Off(zone)
+                            relay_Off(relaypin, zone)
                             log("Turned off Heat - Temp: " + str(temp))
                         except:
                             log("Error in : DB Modify - Stopping Relay")
@@ -228,76 +230,86 @@ class Detect_Motion(threading.Thread):
         self.screen_delay = screen_delay
     def run(self):
         global end_Thread
-
-        ## Setup Vars
         zone = self.zone
         last_motion = sql_fetch('lastmotion', zone)
         time_left = 0
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        #GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        pir=MotionSensor(self.pin)        
         DB_motion = 1
         no_screen_delay = self.screen_delay
         no_motion_delay = self.motion_delay # 15 Min
+        temp_overriden = 0 #used so set_temp only gets changed once
         x = 0
         avg_Motion_data = []
-        
-        ## Setup PIR
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-        pir=MotionSensor(self.pin)        
-        
-        while (x < 10): ## Get initial motion (sum of last 10 reads)
+        while (x < 10):
+            
             if (pir.is_active == True):
                 i = 1
             elif (pir.is_active == False):
                 i = 0
-            ## Add to array
+            
+            #i = GPIO.input(self.pin)
             avg_Motion_data.append(i)
             time.sleep(1)
             x += 1
-        
-    
-        while (end_Thread == 0): ## Start forever motion loop
-            ## Get new motion and update total in array
-            if (pir.is_active == True):
-                i = 1
-            elif (pir.is_active == False):
-                i = 0
-            avg_Motion_data.append(i)
-            del avg_Motion_data[0]
-            motion = sum(avg_Motion_data)
 
-            time_now = time.time()
-
-            ## Motion Detected
-
-            if ((motion > 2)):
-                ## Turn Display On when motion is detected.                    
-                subprocess.call('xset dpms force on', shell=True)
-                if ((motion > 5)):
-                    DB_motion = 1                    
-                    time_now = int(time.time())
-                    motion_detect = 1
-                    ## Update DB
-                    sql_update('lastmotion', time_now, zone, 'Motion Detected - Update lastmotion')
-                    sql_update('motion', DB_motion, zone, 'Motion Detected - Update motion') 
-                    
+        try:
+            while (end_Thread == 0):
+                #pir=MotionSensor(self.pin)
+                GPIO.setmode(GPIO.BCM)
+                #i = GPIO.input(self.pin)
+                if (pir.is_active == True):
+                    i = 1
+                elif (pir.is_active == False):
+                    i = 0
                 
-            ### NO Motion
-            if ((motion <= 2)):                   
-            
-                DB_motion = 0
-                last_motion = sql_fetch('lastmotion', zone)
                 avg_Motion_data.append(i)
                 del avg_Motion_data[0]
                 motion = sum(avg_Motion_data)
-                time_now = int(time.time())
-                time_left = ((last_motion + no_motion_delay) - time_now)
-                if (time_now >= (last_motion + no_screen_delay)): ## Turn display off when no motion
-                    subprocess.call('xset dpms force off', shell=True)
-                if (time_now >= (last_motion + no_motion_delay)):
-                    sql_update('motion', DB_motion, zone, 'No Motion - Update motion')
+                time_now = time.time()
+
+                ## Motion Detected
+                if ((motion > 5)):
+                    #log("motion")
+                    DB_motion = 1
                     
-            time.sleep(.1)
+                    time_now = int(time.time())
+                    sql_update('lastmotion', time_now, zone, 'Motion Detected - Update lastmotion')
+                    sql_update('motion', DB_motion, zone, 'Motion Detected - Update motion') 
+                    motion_detect = 1
+                    ## Turn Display On when motion is detected.                    
+                    subprocess.call('xset dpms force on', shell=True)
+                ### NO Motion
+                elif ((motion <= 5)):
+                    #log("No Moion")                    
+                    while ((motion < 5)):
+                        if (pir.is_active == True):
+                            i = 1
+                        elif (pir.is_active == False):
+                            i = 0
+                        DB_motion = 0
+                        last_motion = sql_fetch('lastmotion', zone)
+                        avg_Motion_data.append(i)
+                        del avg_Motion_data[0]
+                        motion = sum(avg_Motion_data)
+                        time_now = int(time.time())
+                        time_left = ((last_motion + no_motion_delay) - time_now)
+                        if (time_now >= (last_motion + no_screen_delay)): ## Turn display off when no motion
+                            subprocess.call('xset dpms force off', shell=True)
+                        if (time_now >= (last_motion + no_motion_delay)):
+                            sql_update('motion', DB_motion, zone, 'No Motion - Update motion')
+                        time.sleep(.2)
+                    
+                
+
                
+                    
+                time.sleep(.2)
+        except(KeyboardInterrupt, SystemExit):
+            GPIO.setmode(GPIO.BCM)
+            GPIO.cleanup()        
     GPIO.cleanup()
 class Activity(threading.Thread):
     def __init__(self, active_timout):
@@ -317,17 +329,14 @@ class Activity(threading.Thread):
             while (end_Thread == 0):
                 time.sleep(1)
                 now = float(time.time())
-                ## Update Activity for Living
                 sql_update("last_updated", now, "living", "Update for Activity")
-                ## Pull Activity from other zones
                 kitchen_activity = float(sql_fetch("last_updated", "kitchen"))
                 control_activity = float(sql_fetch("last_updated", "control"))
                 upstairs_activity = float(sql_fetch("last_updated", "upstairs"))
-
-                ## Kitchen Activity Monitor
                 if (now > (kitchen_activity + self.active_timeout)): #No Activity
                     sql_update("active", '0', "kitchen", "Kitchen Activity")
                     if (kitchen_notify == 0): #Not Notified
+                        print("NO Activity")
                         try:
                             send_Notification("Living Room", "System - Kitchen Zone Offline")
                         except:
@@ -341,10 +350,11 @@ class Activity(threading.Thread):
                         try:
                             send_Notification("Living Room", "System - Kitchen Zone ReConnected")
                         except:
-                            log("Error in Activity Monitor")
+                            log("Erro in Activity Monitor")
                         else:
                             kitchen_notify = 0
-                                
+                        
+                        
                 ## Control Activity Monitor
                 if (now > (control_activity + self.active_timeout)): #No Activity
                     sql_update("active", '0', "control", "Control Activity")
@@ -379,8 +389,11 @@ class Activity(threading.Thread):
 ## Functions
 ####################
 
-def relay_On(zone):
+def relay_On(pin, zone):
     relay_State = int(sql_fetch('relay', zone))
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setwarnings(False)
     conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
     c = conn.cursor (MySQLdb.cursors.DictCursor)
     try:
@@ -391,8 +404,11 @@ def relay_On(zone):
     sql_update('relay', relay_State, zone, 'relay_On')
     
 
-def relay_Off(zone):
+def relay_Off(pin, zone):
     relay_State = int(sql_fetch('relay', zone))
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pin, GPIO.OUT) ## Relay SETUP
+    GPIO.setwarnings(False)
     conn = MySQLdb.connect("localhost","pi","python","thermostat", port=3306 )
     c = conn.cursor (MySQLdb.cursors.DictCursor)
     relay_State = 0
@@ -452,16 +468,15 @@ def sql_update(field, value, zone, msg):
         c = conn.cursor (MySQLdb.cursors.DictCursor)
     except:
         log("Error Connecting to DB")
-    else:
-        ## Create SQL and Update settings table
-        try:
-            sql = ("UPDATE settings SET " + str(field) + " = '" + str(value) + "' WHERE zone = '" + str(zone) + "'")
-            c.execute(sql)
-            conn.commit()
-            #log(("Changed " + str(field) + " to " + str(value) + " for zone " + str(zone)))
-        except:
-            error = ("Error in SQL Update - " + msg)
-            log(error)
+    ## Create SQL and Update settings table
+    try:
+        sql = ("UPDATE settings SET " + str(field) + " = '" + str(value) + "' WHERE zone = '" + str(zone) + "'")
+        c.execute(sql)
+        conn.commit()
+        #log(("Changed " + str(field) + " to " + str(value) + " for zone " + str(zone)))
+    except:
+        error = ("Error in SQL Update - " + msg)
+        log(error)
         
 def sql_fetch(field, zone):
     ## Connect to SQL DB
