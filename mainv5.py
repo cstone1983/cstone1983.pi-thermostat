@@ -13,6 +13,7 @@ import numpy
 import http.client, urllib
 import MySQLdb
 import paho.mqtt.client as mqtt
+import Adafruit_DHT
 
 #Globals
 global end_Thread ## Used to end all Threads on exit
@@ -30,8 +31,8 @@ end_Thread = 0 # Helps to end active threads
 ## Config Vars
 
 active_timeout = 60 #Time between activity to determin if a zone is disconnected ( need to account for wifi lag)
-avg_Time = 10 #Number of Temp Reads in array average
-avg_Delay = 3 # Delay between temp readings
+avg_Time = 3 #Number of Temp Reads in array average
+avg_Delay = 1 # Delay between temp readings
 no_motion_delay = 900 ## Delay before motion timeout - 900 = 15min
 screen_delay = 60 ## Delay off for the screen
 
@@ -46,75 +47,65 @@ class Update_Data(threading.Thread):
         self.delay = delay
         self.avg_Time = avg_Time
         self.zone = zone
-        self.mq = mqtt.Client()
-        self.mq.connect("192.168.68.112")
-        self.mq.loop_start()
-
-  
+        
+        self.mqtt() ## Connect for MQTT Updates
+        
+        self.DHT_SENSOR = Adafruit_DHT.DHT22
+        self.DHT_PIN = 19
+        
     def run(self):
         global end_Thread
         global startup
+        
         zone = self.zone
 
         new_Temperature = "Calc." #sets initial value while being calculated.
         new_Humidity = 0
-        old_Temperature = 0
-        instance = dht.DHT11(pin=19)
+        
         startup = 1        
+        
         ## Loop to set initial data for temp Average. Time of loop is based on avg_Time
         i = 0
-        avg_temp_Data = []
-        avg_humidity_Data = []
+        self.avg_temp_Data = []
+        self.avg_humidity_Data = []
+        
         log("Getting Average Temperature...Please Wait..")
-        while (i < self.avg_Time):
-            result = instance.read() # Get sensor data from dht.py
-            if result.is_valid():
-                get_Temp = result.temperature # move result to local var
-                get_Temp = (get_Temp*(9/5)+32) # convert to F - Will move to dht.py eventually
-                get_Humidity = result.humidity
-                avg_humidity_Data.append(get_Humidity)
-                if (int(get_Temp) > 32): #Eliminate values under 32, most common errors were 32 and 0
-                    avg_temp_Data.append(get_Temp)
-                    #log(str((self.avg_Time - i)) + " Temp: " + str(get_Temp) + " Humidity: " + str(get_Humidity)) # Debugging print, end will proball show just dots or just countdown
-                    i += 1
-                    time.sleep(self.delay)
-                    
+        
+        self.mq.publish("/tstat/living/temp", "Startup")
+        
+        while (i < self.avg_Time): # Fill array with valid data
+            
+            if self.pull_data():
+                #Checks for valid results from pull_data if so advance loop
+                i += 1
+                time.sleep(self.delay)
+                
+            else:
+            
+                time.sleep(.1)
+                        
         ## Calculate average Temp/Humidity          
-        new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data))) # Do initial Average
-        new_Humidity = float("{0:.2f}".format(numpy.mean(avg_humidity_Data)))
-        sql_update('temp', new_Temperature, zone, 'Update Temp Initial')
-        sql_update('humidity', new_Humidity, zone, 'Update Humidity Initial')
+        self.calc_avg()
+        
+        self.update()
+        
+        
         os.system('clear')
-        log("Done Getting Temp")
-        time.sleep(1)
+        
+        log("Startup Complete")
+        
         ### Start Forever loop to keep temp and humidity updated.
         try:
             startup = 0
             while (end_Thread == 0):
-                result = instance.read()
-                if result.is_valid():
-                    current_Temp = result.temperature #Pull current temp
-                    current_Temp = (current_Temp*(9/5)+32) ## Convert to F
-                    if (int(current_Temp > 32)):
-                        avg_temp_Data.append(current_Temp)
-                        del avg_temp_Data[0]
-                        new_Temperature = float("{0:.2f}".format(numpy.mean(avg_temp_Data)))
-                        ## Update Database
-                        sql_update('temp', new_Temperature, zone, 'Update Temp')
-                        ## Update MQTT
-                        self.mq.publish("/tstat/living/temp", new_Temperature)
-                        
-                ## Get current Humidity
-
-                current_Humidity = result.humidity
-                if (current_Humidity != False):
-                    avg_humidity_Data.append(current_Humidity)
-                    del avg_humidity_Data[0]
-                    new_Humidity = float("{0:2f}".format(numpy.mean(avg_humidity_Data)))
-                    new_Humidity = float("{0:2f}".format(numpy.mean(new_Humidity)))
-                    ## Update Database
-                    sql_update('humidity', new_Humidity, zone, 'Update Humidity')
-                            
+                if self.pull_data():
+                    
+                    del self.avg_temp_Data[0]
+                    del self.avg_humidity_Data[0]
+                    self.calc_avg()
+                    
+                    self.update()                                
+               
                 time.sleep(self.delay) # Sleep delay between readings, usually 1sec
             
         except (KeyboardInterrupt, SystemExit):
@@ -122,6 +113,38 @@ class Update_Data(threading.Thread):
             GPIO.cleanup()
         GPIO.cleanup()
         menu.join()
+    
+    def pull_data(self):
+     
+        humidity, temperature = Adafruit_DHT.read_retry(self.DHT_SENSOR, self.DHT_PIN)
+       
+        if humidity is not None and temperature is not None:
+    
+            self.avg_humidity_Data.append(humidity)
+            self.avg_temp_Data.append((temperature*(9/5)+32))
+                
+            return True
+                
+    def format(self, data):
+        #Format value to 2 decimal plaees
+        
+        val = float("{0:.2f}".format(numpy.mean(data)))
+        return val
+        
+    def calc_avg(self):
+        self.avg_Temp = self.format(self.avg_temp_Data)
+        self.avg_Humidity = self.format(self.avg_humidity_Data)
+    
+    def update(self):
+    
+        sql_update('temp', self.avg_Temp, self.zone, 'Update Temp Initial')
+        sql_update('humidity', self.avg_Humidity, self.zone, 'Update Humidity Initial')
+        self.mq.publish("/tstat/living/temp", self.avg_Temp)
+        
+    def mqtt(self):        
+        self.mq = mqtt.Client()
+        self.mq.connect("192.168.68.112")
+        self.mq.loop_start()
 
 class DB_Modify(threading.Thread):
     def __init__(self, zone):
@@ -153,7 +176,7 @@ class DB_Modify(threading.Thread):
                 # Store Data from DB
                 set_Temp = float(row['settemp'])
                 backup_Temp = float(row['backuptemp'])
-                hold_Temp = int(row['holdtemp'])
+                hold_temp = int(row['holdtemp'])
                 hold = int(row['hold'])
                 temp = float(row['temp'])
                 relay = float(row['relay'])
