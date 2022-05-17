@@ -4,6 +4,7 @@
 #### DONE - ve sql updates to function ( pass field, value, zone)
 ## Make threads independent, no globals as possible
 #### Done - replace prints with log
+#test
 
 
 import RPi.GPIO as GPIO
